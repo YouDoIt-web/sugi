@@ -3,7 +3,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light only" />
-  <title>杉苗管理 復旧版 v12</title>
+  <title>杉苗管理 v13</title>
   <style>
     :root { color-scheme: light only; }
     body {
@@ -13,31 +13,87 @@
       background: #eef2f5;
       overflow: hidden;
     }
-    h1 { margin: 0 0 12px; font-size: 18px; }
-    .toolbar {
-      margin-bottom: 10px;
+    h1 { margin: 0; font-size: 18px; }
+    .topbar {
       display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 0 0 10px;
+      padding-right: 94px;
+    }
+    .title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .topbar-right {
+      display: flex;
+      align-items: center;
       gap: 8px;
       flex-wrap: wrap;
+      margin-top: 18px;
+    }
+    .toolbar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 10px;
+      z-index: 6000;
+      margin: 0;
+      padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+      display: flex;
+      gap: 0;
+      flex-wrap: nowrap;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(to top, rgba(238,242,245,0.98), rgba(238,242,245,0.9), rgba(238,242,245,0));
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      box-sizing: border-box;
+      overflow-x: auto;
     }
     button {
       border: none;
-      border-radius: 8px;
-      padding: 10px 12px;
+      border-radius: 10px;
+      padding: 10px 10px;
       background: #2d3436;
       color: #fff;
       font-size: 13px;
       cursor: pointer;
+      flex: 0 0 auto;
+      white-space: nowrap;
+      min-width: 42px;
+      min-height: 42px;
     }
+    .toolbar button {
+      border-radius: 0;
+      min-width: 40px;
+      padding-left: 9px;
+      padding-right: 9px;
+      box-shadow: inset -1px 0 0 rgba(255,255,255,0.08);
+    }
+    .toolbar button:first-child {
+      border-top-left-radius: 12px;
+      border-bottom-left-radius: 12px;
+    }
+    .toolbar button:last-child {
+      border-top-right-radius: 12px;
+      border-bottom-right-radius: 12px;
+      box-shadow: none;
+    }
+    #deleteBtn { background: #c0392b; }
     #layout {
       overflow: auto;
       height: 70vh;
-      padding-right: 24px;
-      padding-bottom: 180px;
+      padding-right: 0px;
+      padding-bottom: 110px;
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
       white-space: nowrap;
+      display: block;
     }
     #zoomStage {
       display: inline-block;
@@ -125,6 +181,9 @@
       background: #a29bfe;
       color: rgba(0,0,0,0.72);
     }
+    .extend-cell {
+      box-shadow: 0 0 0 2px #0984e3 inset;
+    }
     .selected {
       outline: 2px solid #e17055;
       outline-offset: 1px;
@@ -139,7 +198,8 @@
       border-radius: 8px;
       font-size: 12px;
       pointer-events: none;
-      white-space: nowrap;
+      white-space: normal;
+      max-width: min(320px, calc(100vw - 20px));
       box-shadow: 0 4px 12px rgba(0,0,0,0.25);
     }
     #selectionBox {
@@ -150,15 +210,54 @@
       background: rgba(9,132,227,0.12);
       pointer-events: none;
     }
-    #dateInput {
+    #entryModal {
       position: fixed;
-      left: -9999px;
-      top: -9999px;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
-      pointer-events: none;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 11500;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
     }
+    #entryBox {
+      width: min(92vw, 360px);
+      background: #fff;
+      border-radius: 14px;
+      padding: 14px;
+      box-sizing: border-box;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.2);
+    }
+    #entryBox h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+    }
+    .entry-row { margin-bottom: 10px; }
+    .entry-row label {
+      display: block;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #2d3436;
+    }
+    .entry-row input,
+    .entry-row select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px;
+      border: 1px solid #cfd8dc;
+      border-radius: 8px;
+      font-size: 14px;
+      background: #fff;
+    }
+    .entry-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 12px;
+    }
+    .entry-actions button { min-width: 88px; }
     #toast {
       position: fixed;
       left: 50%;
@@ -180,59 +279,61 @@
       box-sizing: border-box;
     }
     #toast.show { opacity: 1; }
-    #qrModal {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.72);
-      z-index: 12000;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 16px;
-      box-sizing: border-box;
-    }
-    #qrBox {
-      background: #fff;
-      border-radius: 14px;
-      padding: 12px;
-      width: min(92vw, 420px);
-      box-sizing: border-box;
-    }
-    #qrVideoWrap {
-      width: 100%;
-      aspect-ratio: 1 / 1;
-      background: #111;
-      border-radius: 12px;
-      overflow: hidden;
-      position: relative;
-    }
-    #qrVideo {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-    #qrGuide {
-      position: absolute;
-      inset: 18% 18%;
-      border: 2px solid rgba(255,255,255,0.9);
-      border-radius: 12px;
-      box-shadow: 0 0 0 9999px rgba(0,0,0,0.18);
-      pointer-events: none;
-    }
-    #qrStatus {
-      margin-top: 10px;
-      font-size: 13px;
-      color: #2d3436;
-    }
     .flash-lane {
       box-shadow: 0 0 0 4px #ffeaa7 inset, 0 0 0 3px #fdcb6e !important;
     }
+    .menu-wrap {
+      position: relative;
+      display: inline-block;
+    }
+    #moreMenuBtn {
+      background: #636e72;
+      min-width: 40px;
+      padding: 8px 10px;
+      font-size: 18px;
+      line-height: 1;
+    }
+    #moreMenuPanel {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      display: none;
+      width: min(220px, calc(100vw - 48px));
+      background: rgba(255,255,255,0.98);
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      padding: 8px;
+      z-index: 11000;
+      max-height: calc(100vh - 220px);
+      overflow: auto;
+      box-sizing: border-box;
+    }
+    #moreMenuPanel.open { display: block; }
+    #moreMenuPanel button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 0 0 6px;
+      background: #2d3436;
+    }
+    #moreMenuPanel button:last-child { margin-bottom: 0; }
   </style>
 </head>
 <body>
-  <h1>杉苗管理</h1>
-  <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap;">
+  <div class="topbar">
+    <div class="title-wrap">
+      <div class="menu-wrap">
+        <button id="moreMenuBtn" type="button" aria-label="メニュー">☰</button>
+        <div id="moreMenuPanel">
+          <button id="copyBtn" type="button">コピー保存</button>
+          <button id="pasteImportBtn" type="button">貼り付け読込</button>
+          <button id="resetBtn" type="button">初期化</button>
+        </div>
+      </div>
+      <h1>杉苗管理</h1>
+    </div>
+    <div class="topbar-right"></div>
+  </div>  <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap;">
     <div id="counter" style="font-size:14px;font-weight:bold;">出荷可能コンテナ: 0</div>
     <select id="rateSelect" style="padding:4px 6px;border-radius:6px;">
       <option value="1">100%</option>
@@ -244,42 +345,67 @@
       <option value="0.4">40%</option>
     </select>
     <div id="calcResult" style="font-size:14px;font-weight:bold;">苗数: 0</div>
-  </div>
-  <div id="selectedLaneDisplay" style="position:fixed;top:12px;right:12px;z-index:5000;font-size:22px;font-weight:800;color:#2d3436;background:rgba(255,255,255,0.92);padding:8px 14px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.12);line-height:1;">-</div>
-  <div class="toolbar">
+  </div>  <div id="selectedLaneDisplay" style="position:fixed;top:12px;right:12px;z-index:5000;font-size:22px;font-weight:800;color:#2d3436;background:rgba(255,255,255,0.92);padding:8px 14px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.12);line-height:1;">-</div>  <div class="toolbar">
     <button id="setDateBtn" type="button">移植日設定</button>
-    <button id="tempBtn" type="button">仮置き</button>
-    <button id="undoBtn" type="button">取消</button>
-    <button id="deleteBtn" type="button">削除</button>
-    <button id="resetBtn" type="button">初期化</button>
-    <button id="copyBtn" type="button">コピー保存</button>
-    <button id="pasteImportBtn" type="button">貼り付け読込</button>
-    <button id="scanQrBtn" type="button">QR移動</button>
-    <label style="display:flex;align-items:center;gap:6px;color:#111;background:#fff;padding:6px 10px;border-radius:8px;">
-      🔍
-      <input id="zoomSlider" type="range" min="0.2" max="2" step="0.02" value="1" style="width:120px;" />
-    </label>
-    <button id="rectModeBtn" type="button">矩形選択OFF</button>
-    <button id="clearSelBtn" type="button">選択解除</button>
-  </div>
-  <div id="layout"><div id="zoomStage"></div><div id="layoutSpacer"></div></div>
+    <button id="extendBtn" type="button">延長+1ヶ月</button>
+    <button id="moveModeBtn" type="button">✋</button>
+    <button id="rectModeBtn" type="button">□</button>
+    <button id="clearSelBtn" type="button">☒</button>
+    <button id="undoBtn" type="button">↶</button>
+    <button id="redoBtn" type="button">↷</button>
+    <button id="deleteBtn" type="button">✕</button>
+  </div>  <div id="layout"><div id="zoomStage"></div><div id="layoutSpacer"></div></div>
   <div id="tooltip"></div>
   <div id="selectionBox"></div>
-  <div id="toast"></div>
-  <input id="dateInput" type="date" />
-  <div id="qrModal">
-    <div id="qrBox">
-      <div id="qrVideoWrap">
-        <video id="qrVideo" autoplay playsinline muted></video>
-        <div id="qrGuide"></div>
+  <div id="toast"></div>  <div id="entryModal">
+    <div id="entryBox">
+      <h2>移植情報入力</h2>
+      <div class="entry-row">
+        <label for="entryDate">移植日</label>
+        <input id="entryDate" type="date" />
       </div>
-      <div id="qrStatus">QRを枠の中に合わせてください</div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
-        <button id="closeQrBtn" type="button">閉じる</button>
+      <div class="entry-row">
+        <label for="entrySize">サイズ</label>
+        <select id="entrySize">
+          <option value="">未選択</option>
+          <option value="特大">特大</option>
+          <option value="大">大</option>
+          <option value="中">中</option>
+          <option value="戻">戻</option>
+          <option value="挿">挿</option>
+        </select>
+      </div>
+      <div class="entry-row">
+        <label for="entryContainer">コンテナ種類</label>
+        <select id="entryContainer">
+          <option value="">未選択</option>
+          <option value="OY">OY</option>
+          <option value="JFA">JFA</option>
+        </select>
+      </div>
+      <div class="entry-actions">
+        <button id="entryCancelBtn" type="button">閉じる</button>
+        <button id="entrySaveBtn" type="button">保存</button>
       </div>
     </div>
-  </div>  <script>
-    const STORAGE_KEY = "sugi_lane_manager_state_v12";
+  </div>  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDNlcx68PTo5HPYqmap-3xIwlMZfhvv2f0",
+      authDomain: "sugi-59905.firebaseapp.com",
+      projectId: "sugi-59905",
+      storageBucket: "sugi-59905.firebasestorage.app",
+      messagingSenderId: "450085130931",
+      appId: "1:450085130931:web:c39a1c1fe65cf29d9a16c6"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const cloudRef = doc(db, "sugi", "state");
+
+    const STORAGE_KEY = "sugi_lane_manager_state_v13";
     const MONTH1_DAYS = 30;
     const MONTH2_DAYS = 60;
     const MONTH3_DAYS = 90;
@@ -292,6 +418,7 @@
     const selectedIds = new Set();
     const cellData = {};
     const historyStack = [];
+    const redoStack = [];
 
     const counter = document.getElementById("counter");
     const rateSelect = document.getElementById("rateSelect");
@@ -304,23 +431,27 @@
     const selectionBox = document.getElementById("selectionBox");
     const toast = document.getElementById("toast");
     const setDateBtn = document.getElementById("setDateBtn");
-    const tempBtn = document.getElementById("tempBtn");
+    const extendBtn = document.getElementById("extendBtn");
     const undoBtn = document.getElementById("undoBtn");
+    const redoBtn = document.getElementById("redoBtn");
     const deleteBtn = document.getElementById("deleteBtn");
+    const clearSelBtn = document.getElementById("clearSelBtn");
     const resetBtn = document.getElementById("resetBtn");
     const copyBtn = document.getElementById("copyBtn");
     const pasteImportBtn = document.getElementById("pasteImportBtn");
-    const scanQrBtn = document.getElementById("scanQrBtn");
-    const qrModal = document.getElementById("qrModal");
-    const qrVideo = document.getElementById("qrVideo");
-    const qrStatus = document.getElementById("qrStatus");
-    const closeQrBtn = document.getElementById("closeQrBtn");
-    const zoomSlider = document.getElementById("zoomSlider");
+    const moveModeBtn = document.getElementById("moveModeBtn");
     const rectModeBtn = document.getElementById("rectModeBtn");
-    const clearSelBtn = document.getElementById("clearSelBtn");
-    const dateInput = document.getElementById("dateInput");
+    const moreMenuBtn = document.getElementById("moreMenuBtn");
+    const moreMenuPanel = document.getElementById("moreMenuPanel");
+    const entryModal = document.getElementById("entryModal");
+    const entryDate = document.getElementById("entryDate");
+    const entrySize = document.getElementById("entrySize");
+    const entryContainer = document.getElementById("entryContainer");
+    const entryCancelBtn = document.getElementById("entryCancelBtn");
+    const entrySaveBtn = document.getElementById("entrySaveBtn");
 
     let rectSelectMode = false;
+    let moveMode = false;
     let zoomScale = 1;
     let prevZoomScale = 1;
     let activePointers = new Map();
@@ -332,6 +463,8 @@
     let pressLongFired = false;
     let pressStartX = 0;
     let pressStartY = 0;
+    let panLastX = 0;
+    let panLastY = 0;
     let dragSelecting = false;
     let dragCurrentX = 0;
     let dragCurrentY = 0;
@@ -342,15 +475,22 @@
     let autoScrollDirY = 0;
     let tooltipPinned = false;
     let toastTimer = 0;
-    let qrStream = null;
-    let qrScanRaf = 0;
-    let qrDetector = null;
+    let saveDebounceTimer = 0;
+    let isApplyingRemoteState = false;
+    let hasReceivedCloudState = false;
+    let dragSelectionLastUpdate = 0;
+    let lastTapTime = 0;
+    let suppressDoubleTapUntil = 0;
+    let selectableCellCache = [];
 
     function isLane(name){ return name.startsWith("L"); }
     function getRows(name){ return isLane(name) ? (laneLengths[Number(name.slice(1))] || 67) : (pathLengths[name] || 67); }
     function getCols(name){ return isLane(name) ? 4 : 2; }
     function makeId(name,colIndex,row){ return `${name}-${colIndex}-${row}`; }
     function daysSince(dateStr){ return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000); }
+
+    function closeMoreMenu(){ if(moreMenuPanel) moreMenuPanel.classList.remove("open"); }
+    function closeEntryModal(){ if(entryModal) entryModal.style.display = "none"; }
 
     function showToast(msg){
       toast.textContent = msg;
@@ -361,7 +501,7 @@
 
     function getGrowthClass(stored){
       if(!stored || !stored.date) return "";
-      const d = daysSince(stored.date);
+      const d = daysSince(stored.date) - (stored.extend ? 30 : 0);
       if(d >= READY_DAYS) return "ready-cell";
       if(d >= MONTH3_DAYS) return "month3-cell";
       if(d >= MONTH2_DAYS) return "month2-cell";
@@ -372,7 +512,10 @@
     function updateCounter(){
       let count = 0;
       Object.values(cellData).forEach((value)=>{
-        if(value && value.date && daysSince(value.date) >= READY_DAYS) count += 1;
+        if(value && value.date){
+          const d = daysSince(value.date) - (value.extend ? 30 : 0);
+          if(d >= READY_DAYS) count += 1;
+        }
       });
       counter.textContent = `出荷可能コンテナ: ${count}`;
       const rate = parseFloat(rateSelect.value || 0);
@@ -380,12 +523,12 @@
       calcResult.textContent = `苗数: ${result}`;
     }
 
-    function saveState(){
+    function saveLocalState(){
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify({cellData, zoomScale, rate: rateSelect.value})); }
-      catch(e){ console.warn("save failed", e); }
+      catch(e){ console.warn("save local failed", e); }
     }
 
-    function loadState(){
+    function loadLocalState(){
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if(!raw) return;
@@ -396,12 +539,13 @@
         Object.entries(loadedCells).forEach(([k,v]) => { cellData[k] = v; });
         if(typeof parsed.zoomScale === "number") zoomScale = parsed.zoomScale;
         if(parsed.rate) rateSelect.value = parsed.rate;
-      } catch(e){ console.warn("load failed", e); }
+      } catch(e){ console.warn("load local failed", e); }
     }
 
     function snapshotState(){
       historyStack.push(JSON.stringify(cellData));
       if(historyStack.length > 20) historyStack.shift();
+      redoStack.length = 0;
     }
 
     function buildBackupPayload(){
@@ -438,10 +582,11 @@
 
       selectedIds.clear();
       historyStack.length = 0;
-      saveState();
+      redoStack.length = 0;
       render();
       applyZoom(false);
       updateSelectionVisuals();
+      scheduleCloudSave();
     }
 
     function importFromPaste(){
@@ -470,608 +615,4 @@
       const lineRect = line.getBoundingClientRect();
       const layoutRect = layout.getBoundingClientRect();
       layout.scrollLeft += (lineRect.left + lineRect.width / 2) - (layoutRect.left + layoutRect.width / 2);
-      layout.scrollTop += (lineRect.top + lineRect.height / 2) - (layoutRect.top + layoutRect.height / 2);
-      line.classList.add("flash-lane");
-      setTimeout(() => line.classList.remove("flash-lane"), 1800);
-      showToast(`${normalized} に移動しました`);
-      return true;
-    }
-
-    function getRequestedLane(){
-      try{
-        const url = new URL(window.location.href);
-        const lane = url.searchParams.get("lane");
-        return lane ? lane.trim().toUpperCase() : "";
-      }catch(e){
-        return "";
-      }
-    }
-
-    async function stopQrScanner(){
-      if(qrScanRaf){
-        cancelAnimationFrame(qrScanRaf);
-        qrScanRaf = 0;
-      }
-      if(qrStream){
-        qrStream.getTracks().forEach((t) => t.stop());
-        qrStream = null;
-      }
-      qrVideo.srcObject = null;
-      qrModal.style.display = "none";
-    }
-
-    async function scanQrLoop(){
-      if(!qrModal || qrModal.style.display !== "flex") return;
-      try{
-        if(qrDetector && qrVideo.readyState >= 2){
-          const barcodes = await qrDetector.detect(qrVideo);
-          if(barcodes && barcodes.length){
-            const raw = String(barcodes[0].rawValue || "").trim().toUpperCase();
-            if(raw){
-              qrStatus.textContent = `読取: ${raw}`;
-              await stopQrScanner();
-              centerLaneByName(raw);
-              return;
-            }
-          }
-        }
-      }catch(e){
-        console.error(e);
-      }
-      qrScanRaf = requestAnimationFrame(scanQrLoop);
-    }
-
-    async function openQrScanner(){
-      if(!("BarcodeDetector" in window)){
-        alert("このブラウザはQR読取に対応していません");
-        return;
-      }
-      try{
-        qrDetector = new BarcodeDetector({ formats: ["qr_code"] });
-      }catch(e){
-        alert("QR読取の初期化に失敗しました");
-        return;
-      }
-      try{
-        qrStatus.textContent = "カメラを起動しています...";
-        qrModal.style.display = "flex";
-        qrStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
-          audio: false
-        });
-        qrVideo.srcObject = qrStream;
-        await qrVideo.play();
-        qrStatus.textContent = "QRを枠の中に合わせてください";
-        qrScanRaf = requestAnimationFrame(scanQrLoop);
-      }catch(e){
-        console.error(e);
-        qrModal.style.display = "none";
-        alert("カメラを起動できませんでした");
-      }
-    }
-
-    function showTooltip(text,x,y){
-      tooltip.textContent = text;
-      tooltip.style.left = `${x + 10}px`;
-      tooltip.style.top = `${y - 10}px`;
-      tooltip.style.display = "block";
-      tooltipPinned = true;
-    }
-    function hideTooltip(){ tooltip.style.display = "none"; tooltipPinned = false; }
-
-    function clearDragBox(){
-      selectionBox.style.display = "none";
-      selectionBox.style.width = "0px";
-      selectionBox.style.height = "0px";
-    }
-
-    function updateRectModeButton(){
-      rectModeBtn.textContent = rectSelectMode ? "矩形選択ON" : "矩形選択OFF";
-      rectModeBtn.style.background = rectSelectMode ? "#00b894" : "#2d3436";
-    }
-
-    function updateLayoutViewport(){
-      const top = layout.getBoundingClientRect().top;
-      const safeBottom = 16;
-      const h = Math.max(240, window.innerHeight - top - safeBottom);
-      layout.style.height = `${h}px`;
-      const baseW = zoomStage.offsetWidth || 1;
-      const baseH = zoomStage.offsetHeight || 1;
-      const scaledW = Math.ceil(baseW * zoomScale);
-      const scaledH = Math.ceil(baseH * zoomScale);
-      const extraBottom = Math.max(Math.round(window.innerHeight * 1.1), Math.round(420 * zoomScale));
-      const extraRight = Math.max(32, Math.round(32 * zoomScale));
-      layout.style.paddingBottom = `${extraBottom}px`;
-      layout.style.paddingRight = `${extraRight}px`;
-      layoutSpacer.style.width = `${Math.max(1, scaledW - baseW + extraRight)}px`;
-      layoutSpacer.style.height = `${scaledH + 800}px`;
-    }
-
-    function applyZoom(centered = false){
-      const rect = layout.getBoundingClientRect();
-      const cx = layout.scrollLeft + rect.width / 2;
-      const cy = layout.scrollTop + rect.height / 2;
-      zoomStage.style.transformOrigin = "0 0";
-      zoomStage.style.transform = `scale(${zoomScale})`;
-      zoomSlider.value = String(zoomScale);
-      updateLayoutViewport();
-      if(centered && prevZoomScale > 0){
-        const ratio = zoomScale / prevZoomScale;
-        layout.scrollLeft = cx * ratio - rect.width / 2;
-        layout.scrollTop = cy * ratio - rect.height / 2;
-      }
-      prevZoomScale = zoomScale;
-    }
-
-    function clientToContent(clientX, clientY){
-      const stageRect = zoomStage.getBoundingClientRect();
-      return {
-        x: (clientX - stageRect.left) / zoomScale,
-        y: (clientY - stageRect.top) / zoomScale,
-      };
-    }
-
-    function updateDragSelection(){
-      const stageRect = zoomStage.getBoundingClientRect();
-      const currentContent = clientToContent(dragCurrentX, dragCurrentY);
-      const leftContent = Math.min(dragStartContentX, currentContent.x);
-      const topContent = Math.min(dragStartContentY, currentContent.y);
-      const widthContent = Math.abs(currentContent.x - dragStartContentX);
-      const heightContent = Math.abs(currentContent.y - dragStartContentY);
-
-      const left = stageRect.left + leftContent * zoomScale;
-      const top = stageRect.top + topContent * zoomScale;
-      const width = widthContent * zoomScale;
-      const height = heightContent * zoomScale;
-
-      selectionBox.style.display = "block";
-      selectionBox.style.left = `${left}px`;
-      selectionBox.style.top = `${top}px`;
-      selectionBox.style.width = `${width}px`;
-      selectionBox.style.height = `${height}px`;
-
-      selectedIds.clear();
-      document.querySelectorAll(".cell[data-cell-id]").forEach((el)=>{
-        const r = el.getBoundingClientRect();
-        const cellLeft = (r.left - stageRect.left) / zoomScale;
-        const cellTop = (r.top - stageRect.top) / zoomScale;
-        const cellRight = (r.right - stageRect.left) / zoomScale;
-        const cellBottom = (r.bottom - stageRect.top) / zoomScale;
-        const hit = cellRight >= leftContent && cellLeft <= leftContent + widthContent && cellBottom >= topContent && cellTop <= topContent + heightContent;
-        if(hit) selectedIds.add(el.dataset.cellId);
-      });
-    }
-
-    function stopAutoScroll(){
-      autoScrollDirX = 0;
-      autoScrollDirY = 0;
-      if(autoScrollRaf){
-        cancelAnimationFrame(autoScrollRaf);
-        autoScrollRaf = 0;
-      }
-    }
-
-    function autoScrollWhileSelecting(){
-      if(!dragSelecting || !rectSelectMode){
-        stopAutoScroll();
-        return;
-      }
-      const speedX = 22;
-      const speedY = 34;
-      let moved = false;
-
-      if(autoScrollDirY !== 0){
-        const prevTop = layout.scrollTop;
-        layout.scrollBy(0, autoScrollDirY * speedY);
-        if(layout.scrollTop !== prevTop){
-          dragCurrentY += autoScrollDirY * speedY;
-          moved = true;
-        }
-      }
-
-      if(autoScrollDirX !== 0){
-        const prevLeft = layout.scrollLeft;
-        const maxLeft = Math.max(0, layout.scrollWidth - layout.clientWidth);
-        layout.scrollLeft = Math.max(0, Math.min(maxLeft, layout.scrollLeft + autoScrollDirX * speedX));
-        if(layout.scrollLeft !== prevLeft){
-          dragCurrentX += autoScrollDirX * speedX;
-          moved = true;
-        }
-      }
-
-      if(moved){
-        updateDragSelection();
-        updateSelectionVisuals();
-      }
-      autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
-    }
-
-    function getTwoFingerDistance(){
-      if(activePointers.size !== 2) return 0;
-      const pts = [...activePointers.values()];
-      const dx = pts[0].x - pts[1].x;
-      const dy = pts[0].y - pts[1].y;
-      return Math.hypot(dx, dy);
-    }
-
-    function updateTwoFingerScroll(){
-      if(activePointers.size !== 2) return;
-      const pts = [...activePointers.values()];
-      const cx = (pts[0].x + pts[1].x) / 2;
-      const cy = (pts[0].y + pts[1].y) / 2;
-      const dist = getTwoFingerDistance();
-
-      if(lastCenterX || lastCenterY){
-        layout.scrollLeft -= (cx - lastCenterX) * 1.2;
-        layout.scrollTop -= (cy - lastCenterY) * 1.2;
-      }
-
-      if(lastPinchDistance > 0 && dist > 0){
-        const ratio = dist / lastPinchDistance;
-        const delta = Math.abs(dist - lastPinchDistance);
-        if(delta > 3 && Math.abs(ratio - 1) > 0.004){
-          const nextZoom = Math.max(0.2, Math.min(2, zoomScale * ratio));
-          if(Math.abs(nextZoom - zoomScale) > 0.002){
-            zoomScale = nextZoom;
-            applyZoom(true);
-          }
-        }
-      }
-
-      lastCenterX = cx;
-      lastCenterY = cy;
-      lastPinchDistance = dist;
-    }
-
-    function updateSelectionVisuals(){
-      document.querySelectorAll(".cell.selected").forEach((el)=> el.classList.remove("selected"));
-      selectedIds.forEach((id)=>{
-        const el = document.querySelector(`.cell[data-cell-id="${id}"]`);
-        if(el) el.classList.add("selected");
-      });
-      const laneNames = [...new Set([...selectedIds].map((id) => id.split("-")[0]).filter((name) => name))];
-      if(laneNames.length === 0) selectedLaneDisplay.textContent = "-";
-      else if(laneNames.length === 1) selectedLaneDisplay.textContent = laneNames[0];
-      else selectedLaneDisplay.textContent = laneNames.join(", ");
-    }
-
-    function selectSingle(id){
-      selectedIds.clear();
-      selectedIds.add(id);
-      updateSelectionVisuals();
-    }
-
-    function clearSelection(){
-      selectedIds.clear();
-      updateSelectionVisuals();
-    }
-
-    function openDateModal(){
-      if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
-      dateInput.value = "";
-      setTimeout(() => {
-        try {
-          dateInput.focus({ preventScroll: true });
-          if (typeof dateInput.showPicker === "function") dateInput.showPicker();
-          else dateInput.click();
-        } catch (_) {
-          try { dateInput.click(); } catch (_) {}
-        }
-      }, 0);
-    }
-
-    function applyDateToSelection(){
-      if(!dateInput.value) return;
-      snapshotState();
-      selectedIds.forEach((id)=>{
-        if(!cellData[id]) cellData[id] = {};
-        cellData[id].date = dateInput.value;
-      });
-      saveState();
-      render();
-    }
-
-    function toggleTempSelection(){
-      if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
-      snapshotState();
-      selectedIds.forEach((id)=>{
-        if(!cellData[id]) cellData[id] = {};
-        cellData[id].temp = !cellData[id].temp;
-        if(!cellData[id].date && !cellData[id].temp) delete cellData[id];
-      });
-      saveState();
-      render();
-    }
-
-    function deleteSelection(){
-      if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
-      snapshotState();
-      selectedIds.forEach((id)=> delete cellData[id]);
-      saveState();
-      render();
-    }
-
-    function undoLast(){
-      if(historyStack.length === 0){ alert("取消できる操作がありません"); return; }
-      const prev = JSON.parse(historyStack.pop());
-      Object.keys(cellData).forEach(k => delete cellData[k]);
-      Object.entries(prev).forEach(([k,v]) => { cellData[k] = v; });
-      saveState();
-      render();
-    }
-
-    function resetAll(){
-      if(!confirm("本当に初期化しますか？\n移植日・仮置き・選択状態が消えます。")) return;
-      Object.keys(cellData).forEach(k => delete cellData[k]);
-      selectedIds.clear();
-      historyStack.length = 0;
-      localStorage.removeItem(STORAGE_KEY);
-      render();
-    }
-
-    function render(){
-      updateCounter();
-      zoomStage.innerHTML = "";
-      for(const name of layoutOrder){
-        const line = document.createElement("div");
-        line.className = "line";
-        const title = document.createElement("div");
-        title.className = "title";
-        title.textContent = name;
-        title.addEventListener("click", ()=>{
-          selectedIds.clear();
-          const rows = getRows(name);
-          const cols = getCols(name);
-          for(let rr=1; rr<=rows; rr++){
-            for(let cc=0; cc<cols; cc++) selectedIds.add(makeId(name, cc, rr));
-          }
-          updateSelectionVisuals();
-        });
-        line.appendChild(title);
-
-        const grid = document.createElement("div");
-        grid.className = isLane(name) ? "grid-lane" : "grid-path";
-        const rows = getRows(name);
-        const cols = getCols(name);
-        const totalRows = 67;
-        const bottomAlign = /^L1[0-6]$/.test(name) || name === "P10-11" || name === "P12-13" || name === "P14-15";
-        const offset = bottomAlign ? totalRows - rows : 0;
-
-        for(let r=1; r<=totalRows; r++){
-          for(let c=0; c<cols; c++){
-            const cell = document.createElement("div");
-            if(r <= offset || r > offset + rows){
-              cell.className = "cell blank-cell";
-              cell.textContent = "";
-            } else {
-              const realRow = r - offset;
-              const id = makeId(name, c, realRow);
-              const stored = cellData[id];
-              const growthClass = getGrowthClass(stored);
-              cell.className = "cell" + (isLane(name) ? "" : " path-cell");
-              if(growthClass) cell.classList.add(growthClass);
-              if(stored && stored.temp) cell.classList.add("temp-cell");
-              if(selectedIds.has(id)) cell.classList.add("selected");
-              cell.textContent = String(realRow);
-              cell.dataset.cellId = id;
-
-              cell.addEventListener("pointerdown", (e)=>{
-                activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-                if(activePointers.size === 2){
-                  const pts = [...activePointers.values()];
-                  lastCenterX = (pts[0].x + pts[1].x) / 2;
-                  lastCenterY = (pts[0].y + pts[1].y) / 2;
-                  lastPinchDistance = getTwoFingerDistance();
-                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                  hideTooltip();
-                  clearDragBox();
-                  dragSelecting = false;
-                  stopAutoScroll();
-                  return;
-                }
-                pressMoved = false;
-                pressLongFired = false;
-                dragSelecting = false;
-                dragCurrentX = e.clientX;
-                dragCurrentY = e.clientY;
-                const startContent = clientToContent(e.clientX, e.clientY);
-                dragStartContentX = startContent.x;
-                dragStartContentY = startContent.y;
-                pressStartX = e.clientX;
-                pressStartY = e.clientY;
-                hideTooltip();
-                clearDragBox();
-                if(pressTimer) clearTimeout(pressTimer);
-                pressTimer = window.setTimeout(()=>{
-                  pressLongFired = true;
-                  const storedData = cellData[id];
-                  if(storedData && storedData.date) showTooltip(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`, e.clientX, e.clientY);
-                  else showTooltip("移植日未入力", e.clientX, e.clientY);
-                }, 600);
-              });
-
-              cell.addEventListener("pointermove", (e)=>{
-                if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-                if(activePointers.size === 2){
-                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                  hideTooltip();
-                  dragSelecting = false;
-                  clearDragBox();
-                  updateTwoFingerScroll();
-                  return;
-                }
-                const dx = Math.abs(e.clientX - pressStartX);
-                const dy = Math.abs(e.clientY - pressStartY);
-                if(dx > 8 || dy > 8){
-                  pressMoved = true;
-                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                }
-                if(pressMoved && !pressLongFired && rectSelectMode){
-                  dragSelecting = true;
-                  dragCurrentX = e.clientX;
-                  dragCurrentY = e.clientY;
-                  const rect = layout.getBoundingClientRect();
-                  const edge = 80;
-                  autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
-                  const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
-                  const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
-                  autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
-                  updateDragSelection();
-                  updateSelectionVisuals();
-                  if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
-                }
-              });
-
-              cell.addEventListener("pointerup", (e)=>{
-                activePointers.delete(e.pointerId);
-                if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
-                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                autoScrollDirX = 0;
-                autoScrollDirY = 0;
-                if(dragSelecting){
-                  stopAutoScroll();
-                  clearDragBox();
-                  updateSelectionVisuals();
-                } else if(!rectSelectMode && !pressLongFired && !pressMoved){
-                  selectSingle(id);
-                }
-              });
-
-              cell.addEventListener("pointerleave", ()=>{
-                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-              });
-            }
-            grid.appendChild(cell);
-          }
-        }
-        line.appendChild(grid);
-        zoomStage.appendChild(line);
-      }
-    }
-
-    layout.addEventListener("pointerdown", (e)=>{
-      if(e.target.closest && e.target.closest(".cell")) return;
-      activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-      if(activePointers.size === 2){
-        const pts = [...activePointers.values()];
-        lastCenterX = (pts[0].x + pts[1].x) / 2;
-        lastCenterY = (pts[0].y + pts[1].y) / 2;
-        lastPinchDistance = getTwoFingerDistance();
-        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-        hideTooltip();
-        clearDragBox();
-        dragSelecting = false;
-        stopAutoScroll();
-        return;
-      }
-      pressMoved = false;
-      pressLongFired = false;
-      dragSelecting = false;
-      dragCurrentX = e.clientX;
-      dragCurrentY = e.clientY;
-      const startContent = clientToContent(e.clientX, e.clientY);
-      dragStartContentX = startContent.x;
-      dragStartContentY = startContent.y;
-      pressStartX = e.clientX;
-      pressStartY = e.clientY;
-      hideTooltip();
-      clearDragBox();
-      if(pressTimer) clearTimeout(pressTimer);
-    });
-
-    layout.addEventListener("pointermove", (e)=>{
-      if(!activePointers.has(e.pointerId)) return;
-      if(e.target.closest && e.target.closest(".cell")) return;
-      activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-      if(activePointers.size === 2){
-        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-        hideTooltip();
-        dragSelecting = false;
-        clearDragBox();
-        updateTwoFingerScroll();
-        return;
-      }
-      const dx = Math.abs(e.clientX - pressStartX);
-      const dy = Math.abs(e.clientY - pressStartY);
-      if(dx > 8 || dy > 8){
-        pressMoved = true;
-        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-      }
-      if(pressMoved && rectSelectMode){
-        dragSelecting = true;
-        dragCurrentX = e.clientX;
-        dragCurrentY = e.clientY;
-        const rect = layout.getBoundingClientRect();
-        const edge = 80;
-        autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
-        const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
-        const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
-        autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
-        updateDragSelection();
-        updateSelectionVisuals();
-        if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
-      }
-    });
-
-    layout.addEventListener("pointerup", (e)=>{
-      if(!activePointers.has(e.pointerId)) return;
-      activePointers.delete(e.pointerId);
-      if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
-      if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-      autoScrollDirX = 0;
-      autoScrollDirY = 0;
-      if(dragSelecting){
-        stopAutoScroll();
-        clearDragBox();
-        updateSelectionVisuals();
-      }
-    });
-
-    dateInput.addEventListener("change", ()=> applyDateToSelection());
-    setDateBtn.addEventListener("click", openDateModal);
-    tempBtn.addEventListener("click", toggleTempSelection);
-    undoBtn.addEventListener("click", undoLast);
-    deleteBtn.addEventListener("click", deleteSelection);
-    resetBtn.addEventListener("click", resetAll);
-    copyBtn.addEventListener("click", copyJson);
-    pasteImportBtn.addEventListener("click", importFromPaste);
-    scanQrBtn.addEventListener("click", openQrScanner);
-    closeQrBtn.addEventListener("click", stopQrScanner);
-    qrModal.addEventListener("click", (e) => {
-      if(e.target === qrModal) stopQrScanner();
-    });
-    clearSelBtn.addEventListener("click", clearSelection);
-    rateSelect.addEventListener("change", ()=> { updateCounter(); saveState(); });
-    zoomSlider.addEventListener("input", (e)=>{
-      zoomScale = parseFloat(e.target.value);
-      applyZoom(true);
-      saveState();
-    });
-    rectModeBtn.addEventListener("click", ()=>{
-      rectSelectMode = !rectSelectMode;
-      stopAutoScroll();
-      clearDragBox();
-      hideTooltip();
-      updateRectModeButton();
-    });
-    document.addEventListener("pointerdown", (e)=>{
-      if(!tooltipPinned) return;
-      if(e.target.closest && e.target.closest(".cell") && pressLongFired) return;
-      hideTooltip();
-    });
-    window.addEventListener("resize", ()=> applyZoom(false));
-    window.addEventListener("beforeunload", () => { if(qrStream) qrStream.getTracks().forEach((t) => t.stop()); });
-
-    loadState();
-    prevZoomScale = zoomScale;
-    updateRectModeButton();
-    render();
-    applyZoom(false);
-    updateSelectionVisuals();
-
-    const requestedLane = getRequestedLane();
-    if(requestedLane){
-      setTimeout(() => centerLaneByName(requestedLane), 350);
-    }
-  </script></body>
-</html>
+      layout.scrollTop += (lineRect.top + lineRect.height / 2) - (layoutRect.top
