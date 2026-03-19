@@ -1,4 +1,5 @@
-<!DOCTYPE html><html lang="ja">
+<!DOCTYPE html>
+<html lang="ja">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -333,7 +334,9 @@
       <h1>杉苗管理</h1>
     </div>
     <div class="topbar-right"></div>
-  </div>  <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap;">
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap;">
     <div id="counter" style="font-size:14px;font-weight:bold;">出荷可能コンテナ: 0</div>
     <select id="rateSelect" style="padding:4px 6px;border-radius:6px;">
       <option value="1">100%</option>
@@ -345,7 +348,11 @@
       <option value="0.4">40%</option>
     </select>
     <div id="calcResult" style="font-size:14px;font-weight:bold;">苗数: 0</div>
-  </div>  <div id="selectedLaneDisplay" style="position:fixed;top:12px;right:12px;z-index:5000;font-size:22px;font-weight:800;color:#2d3436;background:rgba(255,255,255,0.92);padding:8px 14px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.12);line-height:1;">-</div>  <div class="toolbar">
+  </div>
+
+  <div id="selectedLaneDisplay" style="position:fixed;top:12px;right:12px;z-index:5000;font-size:22px;font-weight:800;color:#2d3436;background:rgba(255,255,255,0.92);padding:8px 14px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,0.12);line-height:1;">-</div>
+
+  <div class="toolbar">
     <button id="setDateBtn" type="button">移植日設定</button>
     <button id="extendBtn" type="button">延長+1ヶ月</button>
     <button id="moveModeBtn" type="button">✋</button>
@@ -354,10 +361,14 @@
     <button id="undoBtn" type="button">↶</button>
     <button id="redoBtn" type="button">↷</button>
     <button id="deleteBtn" type="button">✕</button>
-  </div>  <div id="layout"><div id="zoomStage"></div><div id="layoutSpacer"></div></div>
+  </div>
+
+  <div id="layout"><div id="zoomStage"></div><div id="layoutSpacer"></div></div>
   <div id="tooltip"></div>
   <div id="selectionBox"></div>
-  <div id="toast"></div>  <div id="entryModal">
+  <div id="toast"></div>
+
+  <div id="entryModal">
     <div id="entryBox">
       <h2>移植情報入力</h2>
       <div class="entry-row">
@@ -388,7 +399,9 @@
         <button id="entrySaveBtn" type="button">保存</button>
       </div>
     </div>
-  </div>  <script type="module">
+  </div>
+
+  <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
     import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
@@ -615,4 +628,762 @@
       const lineRect = line.getBoundingClientRect();
       const layoutRect = layout.getBoundingClientRect();
       layout.scrollLeft += (lineRect.left + lineRect.width / 2) - (layoutRect.left + layoutRect.width / 2);
-      layout.scrollTop += (lineRect.top + lineRect.height / 2) - (layoutRect.top
+      layout.scrollTop += (lineRect.top + lineRect.height / 2) - (layoutRect.top + layoutRect.height / 2);
+      line.classList.add("flash-lane");
+      setTimeout(() => line.classList.remove("flash-lane"), 1800);
+      showToast(`${normalized} に移動しました`);
+      return true;
+    }
+
+    function getRequestedLane(){
+      try{
+        const url = new URL(window.location.href);
+        const lane = url.searchParams.get("lane");
+        return lane ? lane.trim().toUpperCase() : "";
+      }catch(e){
+        return "";
+      }
+    }
+
+    function showTooltip(text,x,y){
+      tooltip.textContent = text;
+      tooltip.style.display = "block";
+      const margin = 10;
+      const rect = tooltip.getBoundingClientRect();
+      let left = x + 10;
+      let top = y - rect.height - 10;
+
+      if(left + rect.width > window.innerWidth - margin) left = window.innerWidth - rect.width - margin;
+      if(left < margin) left = margin;
+      if(top < margin) top = y + 14;
+      if(top + rect.height > window.innerHeight - margin) top = window.innerHeight - rect.height - margin;
+      if(top < margin) top = margin;
+
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+      tooltipPinned = true;
+    }
+
+    function hideTooltip(){ tooltip.style.display = "none"; tooltipPinned = false; }
+
+    function clearDragBox(){
+      selectionBox.style.display = "none";
+      selectionBox.style.width = "0px";
+      selectionBox.style.height = "0px";
+    }
+
+    function updateMoveModeButton(){
+      moveModeBtn.textContent = "✋";
+      moveModeBtn.style.background = moveMode ? "#6c5ce7" : "#2d3436";
+    }
+
+    function updateRectModeButton(){
+      rectModeBtn.textContent = "□";
+      rectModeBtn.style.background = rectSelectMode ? "#00b894" : "#2d3436";
+    }
+
+    function updateLayoutViewport(){
+      const top = layout.getBoundingClientRect().top;
+      const safeBottom = 16;
+      const h = Math.max(240, window.innerHeight - top - safeBottom);
+      layout.style.height = `${h}px`;
+      const baseW = zoomStage.offsetWidth || 1;
+      const baseH = zoomStage.offsetHeight || 1;
+      const scaledW = Math.ceil(baseW * zoomScale);
+      const scaledH = Math.ceil(baseH * zoomScale);
+      const extraBottom = Math.max(Math.round(window.innerHeight * 1.1), Math.round(420 * zoomScale));
+      const extraRight = Math.max(32, Math.round(32 * zoomScale));
+      layout.style.paddingBottom = `${extraBottom}px`;
+      layout.style.paddingRight = `0px`;
+      layoutSpacer.style.width = `1px`;
+      layoutSpacer.style.height = `${scaledH + 800}px`;
+    }
+
+    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null){
+      const rect = layout.getBoundingClientRect();
+      let anchorX = layout.scrollLeft + rect.width / 2;
+      let anchorY = layout.scrollTop + rect.height / 2;
+
+      if(anchorClientX != null && anchorClientY != null){
+        anchorX = layout.scrollLeft + (anchorClientX - rect.left);
+        anchorY = layout.scrollTop + (anchorClientY - rect.top);
+      }
+
+      zoomStage.style.transformOrigin = "0 0";
+      zoomStage.style.transform = `scale(${zoomScale})`;
+      updateLayoutViewport();
+
+      if(centered && prevZoomScale > 0){
+        const ratio = zoomScale / prevZoomScale;
+        layout.scrollLeft = anchorX * ratio - (anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2);
+        layout.scrollTop = anchorY * ratio - (anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2);
+      }
+
+      prevZoomScale = zoomScale;
+    }
+
+    function clientToContent(clientX, clientY){
+      const stageRect = zoomStage.getBoundingClientRect();
+      return {
+        x: (clientX - stageRect.left) / zoomScale,
+        y: (clientY - stageRect.top) / zoomScale,
+      };
+    }
+
+    function rebuildSelectableCellCache(){
+      const stageRect = zoomStage.getBoundingClientRect();
+      selectableCellCache = [...document.querySelectorAll('.cell[data-cell-id]')].map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          id: el.dataset.cellId,
+          left: (r.left - stageRect.left) / zoomScale,
+          top: (r.top - stageRect.top) / zoomScale,
+          right: (r.right - stageRect.left) / zoomScale,
+          bottom: (r.bottom - stageRect.top) / zoomScale,
+        };
+      });
+    }
+
+    function updateDragSelection(){
+      dragSelectionLastUpdate = performance.now();
+      const stageRect = zoomStage.getBoundingClientRect();
+      const currentContent = clientToContent(dragCurrentX, dragCurrentY);
+      const leftContent = Math.min(dragStartContentX, currentContent.x);
+      const topContent = Math.min(dragStartContentY, currentContent.y);
+      const widthContent = Math.abs(currentContent.x - dragStartContentX);
+      const heightContent = Math.abs(currentContent.y - dragStartContentY);
+
+      const left = stageRect.left + leftContent * zoomScale;
+      const top = stageRect.top + topContent * zoomScale;
+      const width = widthContent * zoomScale;
+      const height = heightContent * zoomScale;
+
+      selectionBox.style.display = "block";
+      selectionBox.style.left = `${left}px`;
+      selectionBox.style.top = `${top}px`;
+      selectionBox.style.width = `${width}px`;
+      selectionBox.style.height = `${height}px`;
+
+      selectedIds.clear();
+      selectableCellCache.forEach((cell) => {
+        const hit = cell.right >= leftContent && cell.left <= leftContent + widthContent && cell.bottom >= topContent && cell.top <= topContent + heightContent;
+        if(hit) selectedIds.add(cell.id);
+      });
+    }
+
+    function stopAutoScroll(){
+      autoScrollDirX = 0;
+      autoScrollDirY = 0;
+      if(autoScrollRaf){
+        cancelAnimationFrame(autoScrollRaf);
+        autoScrollRaf = 0;
+      }
+    }
+
+    function autoScrollWhileSelecting(){
+      if(!dragSelecting || !rectSelectMode){
+        stopAutoScroll();
+        return;
+      }
+      const speedX = 22;
+      const speedY = 34;
+      let moved = false;
+
+      if(autoScrollDirY !== 0){
+        const prevTop = layout.scrollTop;
+        layout.scrollBy(0, autoScrollDirY * speedY);
+        if(layout.scrollTop !== prevTop){
+          dragCurrentY += autoScrollDirY * speedY;
+          moved = true;
+        }
+      }
+
+      if(autoScrollDirX !== 0){
+        const prevLeft = layout.scrollLeft;
+        const maxLeft = Math.max(0, layout.scrollWidth - layout.clientWidth);
+        layout.scrollLeft = Math.max(0, Math.min(maxLeft, layout.scrollLeft + autoScrollDirX * speedX));
+        if(layout.scrollLeft !== prevLeft){
+          dragCurrentX += autoScrollDirX * speedX;
+          moved = true;
+        }
+      }
+
+      if(moved){
+        updateDragSelectionThrottled();
+      }
+      autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
+    }
+
+    function getTwoFingerDistance(){
+      if(activePointers.size !== 2) return 0;
+      const pts = [...activePointers.values()];
+      const dx = pts[0].x - pts[1].x;
+      const dy = pts[0].y - pts[1].y;
+      return Math.hypot(dx, dy);
+    }
+
+    function updateDragSelectionThrottled(){
+      const now = performance.now();
+      if(now - dragSelectionLastUpdate < 16) return;
+      updateDragSelection();
+    }
+
+    function updateTwoFingerScroll(){
+      suppressDoubleTapUntil = Date.now() + 350;
+      if(activePointers.size !== 2) return;
+      const pts = [...activePointers.values()];
+      const cx = (pts[0].x + pts[1].x) / 2;
+      const cy = (pts[0].y + pts[1].y) / 2;
+      const dist = getTwoFingerDistance();
+
+      if(lastCenterX || lastCenterY){
+        layout.scrollLeft -= (cx - lastCenterX) * 1.2;
+        layout.scrollTop -= (cy - lastCenterY) * 1.2;
+      }
+
+      if(lastPinchDistance > 0 && dist > 0){
+        const ratio = dist / lastPinchDistance;
+        const delta = Math.abs(dist - lastPinchDistance);
+        if(delta > 3 && Math.abs(ratio - 1) > 0.004){
+          const nextZoom = Math.max(0.2, Math.min(2, zoomScale * ratio));
+          if(Math.abs(nextZoom - zoomScale) > 0.002){
+            zoomScale = nextZoom;
+            applyZoom(true, cx, cy);
+          }
+        }
+      }
+
+      lastCenterX = cx;
+      lastCenterY = cy;
+      lastPinchDistance = dist;
+    }
+
+    function updateSelectionVisuals(){
+      document.querySelectorAll(".cell.selected").forEach((el)=> el.classList.remove("selected"));
+      selectedIds.forEach((id)=>{
+        const el = document.querySelector(`.cell[data-cell-id="${id}"]`);
+        if(el) el.classList.add("selected");
+      });
+      const laneNames = [...new Set([...selectedIds].map((id) => id.split("-")[0]).filter((name) => name))];
+      if(laneNames.length === 0) selectedLaneDisplay.textContent = "-";
+      else if(laneNames.length === 1) selectedLaneDisplay.textContent = laneNames[0];
+      else selectedLaneDisplay.textContent = laneNames.join(", ");
+    }
+
+    function selectSingle(id){
+      selectedIds.clear();
+      selectedIds.add(id);
+      updateSelectionVisuals();
+    }
+
+    function clearSelection(){
+      selectedIds.clear();
+      updateSelectionVisuals();
+    }
+
+    function openDateModal(){
+      if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
+      const firstId = [...selectedIds][0];
+      const firstData = cellData[firstId] || {};
+      entryDate.value = firstData.date || "";
+      entrySize.value = firstData.size || "";
+      entryContainer.value = firstData.containerType || "";
+      entryModal.style.display = "flex";
+    }
+
+    function scheduleCloudSave(){
+      if(isApplyingRemoteState) return;
+      saveLocalState();
+      if(saveDebounceTimer) clearTimeout(saveDebounceTimer);
+      saveDebounceTimer = setTimeout(async () => {
+        try {
+          await setDoc(cloudRef, {
+            cellData,
+            zoomScale,
+            rate: rateSelect.value,
+            updatedAt: Date.now()
+          });
+        } catch (e) {
+          console.error(e);
+          showToast("クラウド保存に失敗");
+        }
+      }, 250);
+    }
+
+    function subscribeCloud(){
+      onSnapshot(cloudRef, (snapshot) => {
+        if(!snapshot.exists()){
+          if(!hasReceivedCloudState){
+            hasReceivedCloudState = true;
+            scheduleCloudSave();
+          }
+          return;
+        }
+        const data = snapshot.data() || {};
+        isApplyingRemoteState = true;
+        try {
+          Object.keys(cellData).forEach((k) => delete cellData[k]);
+          Object.entries(data.cellData || {}).forEach(([k,v]) => { cellData[k] = v; });
+          if(typeof data.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, data.zoomScale));
+          if(data.rate) rateSelect.value = String(data.rate);
+          render();
+          applyZoom(false);
+          updateSelectionVisuals();
+          saveLocalState();
+        } finally {
+          isApplyingRemoteState = false;
+          hasReceivedCloudState = true;
+        }
+      }, (error) => {
+        console.error(error);
+        showToast("クラウド読込に失敗");
+      });
+    }
+
+    function applyDateToSelection(){
+      if(!entryDate.value && !entrySize.value && !entryContainer.value){
+        alert("移植日・サイズ・コンテナ種類のどれかを入力してください");
+        return;
+      }
+      snapshotState();
+      selectedIds.forEach((id)=>{
+        if(!cellData[id]) cellData[id] = {};
+        if(entryDate.value) cellData[id].date = entryDate.value;
+        else delete cellData[id].date;
+        if(entrySize.value) cellData[id].size = entrySize.value;
+        else delete cellData[id].size;
+        if(entryContainer.value) cellData[id].containerType = entryContainer.value;
+        else delete cellData[id].containerType;
+        if(!cellData[id].date && !cellData[id].extend && !cellData[id].size && !cellData[id].containerType){
+          delete cellData[id];
+        }
+      });
+      render();
+      closeEntryModal();
+      showToast("移植情報を保存しました");
+      scheduleCloudSave();
+    }
+
+    function toggleExtendSelection(){
+      if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
+      snapshotState();
+      selectedIds.forEach((id)=>{
+        if(!cellData[id]) cellData[id] = {};
+        cellData[id].extend = !cellData[id].extend;
+        if(!cellData[id].date && !cellData[id].extend && !cellData[id].size && !cellData[id].containerType) delete cellData[id];
+      });
+      render();
+      scheduleCloudSave();
+      showToast("延長設定を更新しました");
+    }
+
+    function deleteSelection(){
+      if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
+      snapshotState();
+      selectedIds.forEach((id)=> delete cellData[id]);
+      render();
+      scheduleCloudSave();
+    }
+
+    function undoLast(){
+      if(historyStack.length === 0){ alert("取消できる操作がありません"); return; }
+      redoStack.push(JSON.stringify(cellData));
+      if(redoStack.length > 20) redoStack.shift();
+      const prev = JSON.parse(historyStack.pop());
+      Object.keys(cellData).forEach(k => delete cellData[k]);
+      Object.entries(prev).forEach(([k,v]) => { cellData[k] = v; });
+      render();
+      scheduleCloudSave();
+    }
+
+    function redoLast(){
+      if(redoStack.length === 0){ alert("やり直せる操作がありません"); return; }
+      historyStack.push(JSON.stringify(cellData));
+      if(historyStack.length > 20) historyStack.shift();
+      const next = JSON.parse(redoStack.pop());
+      Object.keys(cellData).forEach(k => delete cellData[k]);
+      Object.entries(next).forEach(([k,v]) => { cellData[k] = v; });
+      render();
+      scheduleCloudSave();
+    }
+
+    function resetAll(){
+      if(!confirm("本当に初期化しますか？\n移植日・仮置き・選択状態が消えます。")) return;
+      Object.keys(cellData).forEach(k => delete cellData[k]);
+      selectedIds.clear();
+      historyStack.length = 0;
+      render();
+      scheduleCloudSave();
+    }
+
+    function render(){
+      updateCounter();
+      zoomStage.innerHTML = "";
+      for(const name of layoutOrder){
+        const line = document.createElement("div");
+        line.className = "line";
+
+        const selectWholeLane = () => {
+          selectedIds.clear();
+          const rows = getRows(name);
+          const cols = getCols(name);
+          for(let rr=1; rr<=rows; rr++){
+            for(let cc=0; cc<cols; cc++) selectedIds.add(makeId(name, cc, rr));
+          }
+          updateSelectionVisuals();
+        };
+
+        const title = document.createElement("div");
+        title.className = "title";
+        title.textContent = name;
+        title.addEventListener("click", selectWholeLane);
+        line.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = isLane(name) ? "grid-lane" : "grid-path";
+        const rows = getRows(name);
+        const cols = getCols(name);
+        const totalRows = 67;
+        const bottomAlign = /^L1[0-6]$/.test(name) || name === "P10-11" || name === "P12-13" || name === "P14-15";
+        const offset = bottomAlign ? totalRows - rows : 0;
+
+        for(let r=1; r<=totalRows; r++){
+          for(let c=0; c<cols; c++){
+            const cell = document.createElement("div");
+            if(r <= offset || r > offset + rows){
+              cell.className = "cell blank-cell";
+              cell.textContent = "";
+            } else {
+              const realRow = r - offset;
+              const id = makeId(name, c, realRow);
+              const stored = cellData[id];
+              const growthClass = getGrowthClass(stored);
+              cell.className = "cell" + (isLane(name) ? "" : " path-cell");
+              if(growthClass) cell.classList.add(growthClass);
+              if(stored && stored.extend) cell.classList.add("extend-cell");
+              if(selectedIds.has(id)) cell.classList.add("selected");
+              cell.textContent = String(realRow);
+              cell.dataset.cellId = id;
+
+              cell.addEventListener("pointerdown", (e)=>{
+                if(moveMode){
+                  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                  panLastX = e.clientX;
+                  panLastY = e.clientY;
+                }
+                activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                if(activePointers.size === 2){
+                  const pts = [...activePointers.values()];
+                  lastCenterX = (pts[0].x + pts[1].x) / 2;
+                  lastCenterY = (pts[0].y + pts[1].y) / 2;
+                  lastPinchDistance = getTwoFingerDistance();
+                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                  hideTooltip();
+                  clearDragBox();
+                  dragSelecting = false;
+                  stopAutoScroll();
+                  return;
+                }
+                pressMoved = false;
+                pressLongFired = false;
+                dragSelecting = false;
+                dragCurrentX = e.clientX;
+                dragCurrentY = e.clientY;
+                const startContent = clientToContent(e.clientX, e.clientY);
+                dragStartContentX = startContent.x;
+                dragStartContentY = startContent.y;
+                pressStartX = e.clientX;
+                pressStartY = e.clientY;
+                hideTooltip();
+                clearDragBox();
+                if(pressTimer) clearTimeout(pressTimer);
+                pressTimer = window.setTimeout(()=>{
+                  pressLongFired = true;
+                  const storedData = cellData[id];
+                  if(storedData && (storedData.date || storedData.size || storedData.containerType || storedData.extend)) {
+                    const parts = [];
+                    if(storedData.date) parts.push(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`);
+                    if(storedData.size) parts.push(`サイズ: ${storedData.size}`);
+                    if(storedData.containerType) parts.push(`コンテナ: ${storedData.containerType}`);
+                    if(storedData.extend) parts.push(`延長: +1ヶ月`);
+                    showTooltip(parts.join(" / "), e.clientX, e.clientY);
+                  } else {
+                    showTooltip("移植情報未入力", e.clientX, e.clientY);
+                  }
+                }, 600);
+              });
+
+              cell.addEventListener("pointermove", (e)=>{
+                if(moveMode && activePointers.has(e.pointerId) && activePointers.size < 2){
+                  const dx = e.clientX - panLastX;
+                  const dy = e.clientY - panLastY;
+                  const movedEnough = Math.abs(dx) > 10 || Math.abs(dy) > 10;
+                  // 長押しを殺さない（移動中でも表示したい）
+                  // なのでここではpressTimerを消さない
+                  layout.scrollLeft -= dx;
+                  layout.scrollTop -= dy;
+                  panLastX = e.clientX;
+                  panLastY = e.clientY;
+                  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                  return;
+                }
+                if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
+                if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                if(activePointers.size === 2){
+                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                  hideTooltip();
+                  dragSelecting = false;
+                  clearDragBox();
+                  updateTwoFingerScroll();
+                  return;
+                }
+                const dx = Math.abs(e.clientX - pressStartX);
+                const dy = Math.abs(e.clientY - pressStartY);
+                if(dx > 8 || dy > 8){
+                  pressMoved = true;
+                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                }
+                if(pressMoved && !pressLongFired && rectSelectMode){
+                  dragSelecting = true;
+                  dragCurrentX = e.clientX;
+                  dragCurrentY = e.clientY;
+                  const rect = layout.getBoundingClientRect();
+                  const edge = 80;
+                  autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
+                  const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
+                  const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
+                  autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
+                  updateDragSelectionThrottled();
+                  if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
+                }
+              });
+
+              cell.addEventListener("pointerup", (e)=>{
+                activePointers.delete(e.pointerId);
+                if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
+                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                autoScrollDirX = 0;
+                autoScrollDirY = 0;
+                if(dragSelecting){
+                  stopAutoScroll();
+                  clearDragBox();
+                  updateSelectionVisuals();
+                } else if(!rectSelectMode && !pressLongFired && !pressMoved){
+                  const now = Date.now();
+                  if(now < suppressDoubleTapUntil){
+                    lastTapTime = 0;
+                    selectSingle(id);
+                    return;
+                  }
+                  const dt = now - lastTapTime;
+                  if(e.pointerType === "touch" && dt > 0 && dt < 280){
+                    const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
+                    zoomScale = nextZoom;
+                    applyZoom(true, e.clientX, e.clientY);
+                    lastTapTime = 0;
+                    return;
+                  }
+                  lastTapTime = now;
+                  selectSingle(id);
+                }
+              });
+
+              cell.addEventListener("pointerleave", ()=>{
+                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+              });
+            }
+            grid.appendChild(cell);
+          }
+        }
+
+        line.appendChild(grid);
+
+        const bottomTitle = document.createElement("div");
+        bottomTitle.className = "title";
+        bottomTitle.textContent = name;
+        bottomTitle.style.marginTop = "6px";
+        bottomTitle.addEventListener("click", selectWholeLane);
+        line.appendChild(bottomTitle);
+
+        zoomStage.appendChild(line);
+      }
+      rebuildSelectableCellCache();
+    }
+
+    layout.addEventListener("pointerdown", (e)=>{
+      if(moveMode){
+        activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+        panLastX = e.clientX;
+        panLastY = e.clientY;
+        return;
+      }
+      if(e.target.closest && e.target.closest(".cell")) return;
+      activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(activePointers.size === 2){
+        const pts = [...activePointers.values()];
+        lastCenterX = (pts[0].x + pts[1].x) / 2;
+        lastCenterY = (pts[0].y + pts[1].y) / 2;
+        lastPinchDistance = getTwoFingerDistance();
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+        hideTooltip();
+        clearDragBox();
+        dragSelecting = false;
+        stopAutoScroll();
+        return;
+      }
+      pressMoved = false;
+      pressLongFired = false;
+      dragSelecting = false;
+      dragCurrentX = e.clientX;
+      dragCurrentY = e.clientY;
+      const startContent = clientToContent(e.clientX, e.clientY);
+      dragStartContentX = startContent.x;
+      dragStartContentY = startContent.y;
+      pressStartX = e.clientX;
+      pressStartY = e.clientY;
+      hideTooltip();
+      clearDragBox();
+      if(pressTimer) clearTimeout(pressTimer);
+    });
+
+    layout.addEventListener("pointermove", (e)=>{
+      if(!activePointers.has(e.pointerId)) return;
+      if(moveMode && activePointers.size < 2){
+        const dx = e.clientX - panLastX;
+        const dy = e.clientY - panLastY;
+        layout.scrollLeft -= dx;
+        layout.scrollTop -= dy;
+        panLastX = e.clientX;
+        panLastY = e.clientY;
+        activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+        return;
+      }
+      if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
+      if(e.target.closest && e.target.closest(".cell")) return;
+      activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(activePointers.size === 2){
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+        hideTooltip();
+        dragSelecting = false;
+        clearDragBox();
+        updateTwoFingerScroll();
+        return;
+      }
+      const dx = Math.abs(e.clientX - pressStartX);
+      const dy = Math.abs(e.clientY - pressStartY);
+      if(dx > 8 || dy > 8){
+        pressMoved = true;
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+      }
+      if(pressMoved && rectSelectMode){
+        dragSelecting = true;
+        dragCurrentX = e.clientX;
+        dragCurrentY = e.clientY;
+        const rect = layout.getBoundingClientRect();
+        const edge = 80;
+        autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
+        const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
+        const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
+        autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
+        updateDragSelection();
+        updateSelectionVisuals();
+        if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
+      }
+    });
+
+    layout.addEventListener("pointerup", (e)=>{
+      if(!activePointers.has(e.pointerId)) return;
+      activePointers.delete(e.pointerId);
+      if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
+      if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+      autoScrollDirX = 0;
+      autoScrollDirY = 0;
+      if(dragSelecting){
+        stopAutoScroll();
+        clearDragBox();
+        updateSelectionVisuals();
+      }
+
+      if(!moveMode && e.pointerType === "touch"){
+        const now = Date.now();
+        if(now < suppressDoubleTapUntil){
+          lastTapTime = 0;
+          return;
+        }
+        const dt = now - lastTapTime;
+        if(dt > 0 && dt < 280){
+          const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
+          zoomScale = nextZoom;
+          applyZoom(true, e.clientX, e.clientY);
+          lastTapTime = 0;
+          return;
+        }
+        lastTapTime = now;
+      }
+    });
+
+    entryCancelBtn.addEventListener("click", closeEntryModal);
+    entrySaveBtn.addEventListener("click", applyDateToSelection);
+    entryModal.addEventListener("click", (e) => {
+      if(e.target === entryModal) closeEntryModal();
+    });
+    setDateBtn.addEventListener("click", openDateModal);
+    extendBtn.addEventListener("click", toggleExtendSelection);
+    undoBtn.addEventListener("click", undoLast);
+    redoBtn.addEventListener("click", redoLast);
+    deleteBtn.addEventListener("click", deleteSelection);
+    clearSelBtn.addEventListener("click", clearSelection);
+    resetBtn.addEventListener("click", () => { closeMoreMenu(); resetAll(); });
+    copyBtn.addEventListener("click", () => { closeMoreMenu(); copyJson(); });
+    pasteImportBtn.addEventListener("click", () => { closeMoreMenu(); importFromPaste(); });
+    moreMenuBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      moreMenuPanel.classList.toggle("open");
+    });
+    rateSelect.addEventListener("change", ()=> { updateCounter(); scheduleCloudSave(); });
+    moveModeBtn.addEventListener("click", ()=>{
+      moveMode = !moveMode;
+      if(moveMode){
+        rectSelectMode = false;
+        updateRectModeButton();
+      }
+      stopAutoScroll();
+      clearDragBox();
+      hideTooltip();
+      updateMoveModeButton();
+    });
+    rectModeBtn.addEventListener("click", ()=>{
+      rectSelectMode = !rectSelectMode;
+      if(rectSelectMode){
+        moveMode = false;
+        updateMoveModeButton();
+      }
+      stopAutoScroll();
+      clearDragBox();
+      hideTooltip();
+      updateRectModeButton();
+    });
+    document.addEventListener("pointerdown", (e)=>{
+      if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
+      if(!tooltipPinned) return;
+      if(e.target.closest && e.target.closest(".cell") && pressLongFired) return;
+      hideTooltip();
+    });
+    window.addEventListener("resize", ()=> applyZoom(false));
+
+    loadLocalState();
+    prevZoomScale = zoomScale;
+    updateMoveModeButton();
+    updateRectModeButton();
+    render();
+    applyZoom(false);
+    updateSelectionVisuals();
+    subscribeCloud();
+
+    const requestedLane = getRequestedLane();
+    if(requestedLane){
+      setTimeout(() => centerLaneByName(requestedLane), 350);
+    }
+  </script>
+</body>
+</html>
