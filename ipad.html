@@ -524,6 +524,7 @@
       const longSide = Math.max(window.innerWidth || 0, window.innerHeight || 0);
       return coarse && longSide >= 900;
     })();
+    const disableDoubleTapZoom = isIPadSubMode;
 
     const counter = document.getElementById("counter");
     const rateSelect = document.getElementById("rateSelect");
@@ -1436,7 +1437,8 @@
         }
         const dt = now - lastTapTime;
         const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
-        const canDoubleTapZoom = e.pointerType === "touch"
+        const canDoubleTapZoom = !disableDoubleTapZoom
+          && e.pointerType === "touch"
           && now >= recentTouchScrollUntil
           && dt > 0
           && dt < 280
@@ -1827,7 +1829,7 @@
         }
         const dt = now - lastTapTime;
         const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
-        if(dt > 0 && dt < 280 && tapMove <= 18){
+        if(!disableDoubleTapZoom && dt > 0 && dt < 280 && tapMove <= 18){
           const nextZoom = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
           applySafeDoubleTapZoom(nextZoom, e.clientX, e.clientY);
           lastTapTime = 0;
@@ -1932,6 +1934,7 @@
       clampScrollPosition();
       console.assert(layout.scrollTop === 0 && layout.scrollLeft === 0, "clampScrollPosition should keep scroll within bounds");
       console.assert(typeof applySafeDoubleTapZoom === "function", "safe double tap zoom helper should exist");
+      console.assert(typeof disableDoubleTapZoom === "boolean", "disableDoubleTapZoom flag should exist");
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: todayString() }) === true, "fresh extend frame should show");
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10) }) === false, "old extend frame should hide");
       Object.keys(cellData).forEach((k) => delete cellData[k]);
