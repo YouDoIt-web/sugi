@@ -40,13 +40,14 @@
       margin-top: 18px;
     }
     .toolbar {
-      position: absolute;
+      position: fixed;
       left: 0;
       right: 0;
-      bottom: 10px;
+      bottom: 0;
       z-index: 6000;
       margin: 0;
       padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+      box-sizing: border-box;
       display: flex;
       gap: 0;
       flex-wrap: nowrap;
@@ -61,7 +62,6 @@
       -webkit-backdrop-filter: none;
       background: linear-gradient(to top, rgba(238,242,245,0.99), rgba(238,242,245,0.97), rgba(238,242,245,0.88));
     }
-    body.viewport-fixed-ui .toolbar,
     body.viewport-fixed-ui #tooltip,
     body.viewport-fixed-ui #toast,
     body.viewport-fixed-ui #copyToast,
@@ -1109,14 +1109,12 @@
     function syncViewportFixedUi(){
       const metrics = getViewportMetrics();
       const vvActive = !!window.visualViewport && metrics.scale !== 1;
-      document.body.classList.toggle("viewport-fixed-ui", vvActive || isIPadSubMode);
+      document.body.classList.toggle("viewport-fixed-ui", vvActive);
 
-      const toolbarMargin = 10;
-      const toolbarBottom = toolbarMargin + (window.innerHeight - (metrics.offsetTop + metrics.height));
-      toolbar.style.left = `${metrics.offsetLeft}px`;
-      toolbar.style.right = 'auto';
-      toolbar.style.width = `${metrics.width}px`;
-      toolbar.style.bottom = `${Math.max(10, toolbarBottom)}px`;
+      toolbar.style.left = '';
+      toolbar.style.right = '';
+      toolbar.style.width = '';
+      toolbar.style.bottom = '';
 
       if(moreMenuPanel.classList.contains('open')){
         const menuRect = moreMenuBtn.getBoundingClientRect();
