@@ -220,9 +220,13 @@
       cursor: default;
       border-color: transparent;
     }
-    .dated-cell, .month1-cell {
+    .dated-cell {
       background: #ff7675;
       color: rgba(0,0,0,0.65);
+    }
+    .month1-cell {
+      background: #f7a36a;
+      color: rgba(0,0,0,0.72);
     }
     .month2-cell {
       background: #fab1a0;
@@ -231,6 +235,14 @@
     .month3-cell {
       background: rgb(255, 245, 130) !important;
       color: #111 !important;
+    }
+    .hinoki-cell {
+      background: #b8875a !important;
+      color: rgba(0,0,0,0.72) !important;
+    }
+    .matsu-cell {
+      background: #a29bfe !important;
+      color: rgba(0,0,0,0.78) !important;
     }
     .ready-cell {
       background: #55efc4;
@@ -442,6 +454,8 @@
           <option value="中">中</option>
           <option value="戻">戻</option>
           <option value="挿">挿</option>
+          <option value="ヒノキ">ヒノキ</option>
+          <option value="松">松</option>
         </select>
       </div>
       <div class="entry-row">
@@ -592,10 +606,6 @@
       return { lane, col, row };
     }
 
-    function getSortedSelectedIds(){
-      return [...selectedIds].sort((a, b) => compareCellIds(a, b));
-    }
-
     function compareCellIds(a, b){
       const pa = parseCellId(a);
       const pb = parseCellId(b);
@@ -606,13 +616,25 @@
       return (pa?.col || 0) - (pb?.col || 0);
     }
 
+    function getSortedSelectedIds(){
+      return [...selectedIds].sort(compareCellIds);
+    }
+
     function getSelectionAnchor(idsIterable = selectedIds){
       const ids = [...idsIterable].filter(Boolean);
       if(ids.length === 0) return null;
       ids.sort(compareCellIds);
-      const parsed = parseCellId(ids[0]);
-      if(!parsed) return null;
-      return parsed;
+      return parseCellId(ids[0]);
+    }
+
+    function cloneCellValue(value){
+      if(!value || typeof value !== "object") return null;
+      const cloned = {};
+      if(value.date) cloned.date = value.date;
+      if(value.size) cloned.size = value.size;
+      if(value.containerType) cloned.containerType = value.containerType;
+      if(value.extend) cloned.extend = true;
+      return Object.keys(cloned).length ? cloned : null;
     }
 
     function buildRangeClipboardFromSelection(){
@@ -620,6 +642,7 @@
       if(ids.length === 0) return null;
       const anchor = getSelectionAnchor(ids);
       if(!anchor) return null;
+      const anchorLaneIndex = layoutOrder.indexOf(anchor.lane);
       const items = [];
       ids.forEach((id) => {
         const pos = parseCellId(id);
@@ -628,7 +651,7 @@
         if(!value) return;
         items.push({
           sourceId: id,
-          laneOffset: layoutOrder.indexOf(pos.lane) - layoutOrder.indexOf(anchor.lane),
+          laneOffset: layoutOrder.indexOf(pos.lane) - anchorLaneIndex,
           colOffset: pos.col - anchor.col,
           rowOffset: pos.row - anchor.row,
           data: value,
@@ -644,7 +667,7 @@
     }
 
     function resolveClipboardTargetIds(clipboard, targetAnchor){
-      if(!clipboard || !clipboard.items || !targetAnchor) return [];
+      if(!clipboard || !Array.isArray(clipboard.items) || !targetAnchor) return [];
       const targetLaneIndex = layoutOrder.indexOf(targetAnchor.lane);
       if(targetLaneIndex < 0) return [];
       const resolved = [];
@@ -660,16 +683,6 @@
         resolved.push({ id: makeId(lane, col, row), data: cloneCellValue(item.data) });
       });
       return resolved;
-    }
-
-    function cloneCellValue(value){
-      if(!value || typeof value !== "object") return null;
-      const cloned = {};
-      if(value.date) cloned.date = value.date;
-      if(value.size) cloned.size = value.size;
-      if(value.containerType) cloned.containerType = value.containerType;
-      if(value.extend) cloned.extend = true;
-      return Object.keys(cloned).length ? cloned : null;
     }
 
     function saveCellClipboard(){
@@ -692,13 +705,11 @@
           return;
         }
         if(parsed.data && typeof parsed.data === "object") {
+          const pos = parseCellId(parsed.sourceId || "");
           cellClipboard = {
             version: 1,
             copiedAt: parsed.copiedAt || Date.now(),
-            anchor: (() => {
-              const pos = parseCellId(parsed.sourceId || "");
-              return pos ? { lane: pos.lane, col: pos.col, row: pos.row } : null;
-            })(),
+            anchor: pos ? { lane: pos.lane, col: pos.col, row: pos.row } : null,
             items: [{
               sourceId: parsed.sourceId || "",
               laneOffset: 0,
@@ -728,7 +739,10 @@
     }
 
     function getGrowthClass(stored){
-      if(!stored || !stored.date) return "";
+      if(!stored) return "";
+      if(stored.size === "ヒノキ") return "hinoki-cell";
+      if(stored.size === "松") return "matsu-cell";
+      if(!stored.date) return "";
       const d = daysSince(stored.date) - (stored.extend ? 30 : 0);
       if(d >= READY_DAYS) return "ready-cell";
       if(d >= MONTH3_DAYS) return "month3-cell";
@@ -737,23 +751,50 @@
       return "dated-cell";
     }
 
-    function updateCounter(){
-      let count = 0;
-      Object.values(cellData).forEach((value)=>{
-        if(value && value.date){
-          const d = daysSince(value.date) - (value.extend ? 30 : 0);
-          if(d >= READY_DAYS) count += 1;
+    function isReadyCountTarget(value){
+      if(!value || !value.date) return false;
+      if(value.size === "ヒノキ" || value.size === "松") return false;
+      const d = daysSince(value.date) - (value.extend ? 30 : 0);
+      return d >= READY_DAYS;
+    }
+
+    function getReadyCount(idsIterable = null){
+      if(idsIterable){
+        let count = 0;
+        for(const id of idsIterable){
+          if(isReadyCountTarget(cellData[id])) count += 1;
         }
+        return count;
+      }
+      let count = 0;
+      Object.values(cellData).forEach((value) => {
+        if(isReadyCountTarget(value)) count += 1;
       });
-      counter.textContent = `出荷可能コンテナ: ${count}`;
+      return count;
+    }
+
+    function updateCounter(){
+      const totalReadyCount = getReadyCount();
       const rate = parseFloat(rateSelect.value || 0);
-      const result = Math.floor(count * 40 * rate);
+      const result = Math.floor(totalReadyCount * 40 * rate);
       calcResult.textContent = `苗数: ${result}`;
+      if(selectedIds.size > 0){
+        counter.textContent = `選択中の出荷可能: ${getReadyCount(selectedIds)}`;
+      } else {
+        counter.textContent = `出荷可能コンテナ: ${totalReadyCount}`;
+      }
+    }
+
+    function updateSelectedCounter(){
+      updateCounter();
     }
 
     function saveLocalState(){
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({cellData, zoomScale, rate: rateSelect.value})); }
-      catch(e){ console.warn("save local failed", e); }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({cellData, zoomScale, rate: rateSelect.value}));
+      } catch(e){
+        console.warn("save local failed", e);
+      }
     }
 
     function loadLocalState(){
@@ -763,11 +804,15 @@
         const parsed = JSON.parse(raw);
         if(!parsed || typeof parsed !== "object") return;
         const loadedCells = parsed.cellData && typeof parsed.cellData === "object" ? parsed.cellData : parsed;
-        Object.keys(cellData).forEach(k => delete cellData[k]);
-        Object.entries(loadedCells).forEach(([k,v]) => { cellData[k] = v; });
-        if(typeof parsed.zoomScale === "number" && Number.isFinite(parsed.zoomScale)) zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
+        Object.keys(cellData).forEach((k) => delete cellData[k]);
+        Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
+        if(typeof parsed.zoomScale === "number" && Number.isFinite(parsed.zoomScale)) {
+          zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
+        }
         if(parsed.rate) rateSelect.value = parsed.rate;
-      } catch(e){ console.warn("load local failed", e); }
+      } catch(e){
+        console.warn("load local failed", e);
+      }
     }
 
     function snapshotState(){
@@ -786,11 +831,11 @@
     }
 
     async function copyJson(){
-      try{
+      try {
         const json = JSON.stringify(buildBackupPayload(), null, 2);
         await navigator.clipboard.writeText(json);
         showToast("JSONをコピーしました");
-      }catch(e){
+      } catch(e) {
         console.error(e);
         alert("コピー保存に失敗しました");
       }
@@ -802,8 +847,8 @@
         : (parsed && typeof parsed === "object" ? parsed : null);
       if(!loadedCells || typeof loadedCells !== "object") throw new Error("invalid json");
 
-      Object.keys(cellData).forEach(k=>delete cellData[k]);
-      Object.entries(loadedCells).forEach(([k,v])=>{ cellData[k]=v; });
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
 
       if(typeof parsed.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
       if(parsed.rate) rateSelect.value = String(parsed.rate);
@@ -820,11 +865,11 @@
     function importFromPaste(){
       const text = prompt("JSONを貼り付けてください");
       if(!text) return;
-      try{
+      try {
         const parsed = JSON.parse(text);
         applyImportedPayload(parsed);
         showToast("貼り付け読込しました");
-      }catch(e){
+      } catch(e) {
         console.error(e);
         alert("JSONが不正です");
       }
@@ -901,16 +946,16 @@
     }
 
     function getRequestedLane(){
-      try{
+      try {
         const url = new URL(window.location.href);
         const lane = url.searchParams.get("lane");
         return lane ? lane.trim().toUpperCase() : "";
-      }catch(e){
+      } catch(e) {
         return "";
       }
     }
 
-    function showTooltip(text,x,y){
+    function showTooltip(text, x, y){
       tooltip.textContent = text;
       tooltip.style.display = "block";
       const margin = 10;
@@ -925,6 +970,11 @@
       tooltip.style.left = `${left}px`;
       tooltip.style.top = `${top}px`;
       tooltipPinned = true;
+    }
+
+    function hideTooltip(){
+      tooltip.style.display = "none";
+      tooltipPinned = false;
     }
 
     function getCellInfoText(id){
@@ -958,8 +1008,6 @@
       cellActionMenu.style.left = `${left}px`;
       cellActionMenu.style.top = `${top}px`;
     }
-
-    function hideTooltip(){ tooltip.style.display = "none"; tooltipPinned = false; }
 
     function clearDragBox(){
       selectionBox.style.display = "none";
@@ -1071,7 +1119,7 @@
 
     function updateDragSelection(){
       dragSelectionLastUpdate = performance.now();
-      if(!selectableCellCache || selectableCellCache.length === 0) rebuildSelectableCellCache();
+      if(!selectableCellCache.length) rebuildSelectableCellCache();
       const rect = layout.getBoundingClientRect();
       const currentContent = clientToContent(dragCurrentX, dragCurrentY);
       const leftContent = Math.min(dragStartContentX, currentContent.x);
@@ -1144,9 +1192,7 @@
     function getTwoFingerDistance(){
       if(activePointers.size !== 2) return 0;
       const pts = [...activePointers.values()];
-      const dx = pts[0].x - pts[1].x;
-      const dy = pts[0].y - pts[1].y;
-      return Math.hypot(dx, dy);
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     }
 
     function updateTwoFingerScroll(){
@@ -1193,13 +1239,15 @@
         if(el) el.classList.add("selected");
       });
       prevSelectedVisualIds = new Set(selectedIds);
-      const laneNames = [...new Set([...selectedIds].map((id) => id.split("-")[0]).filter((name) => name))];
+      const laneNames = [...new Set([...selectedIds].map((id) => id.split("-")[0]).filter(Boolean))];
       if(laneNames.length === 0) selectedLaneDisplay.textContent = "-";
       else if(laneNames.length === 1) selectedLaneDisplay.textContent = laneNames[0];
       else selectedLaneDisplay.textContent = laneNames.join(", ");
+      updateCounter();
     }
 
     function selectSingle(id){
+      if(!id) return;
       selectedIds.clear();
       selectedIds.add(id);
       updateSelectionVisuals();
@@ -1207,6 +1255,27 @@
 
     function clearSelection(){
       selectedIds.clear();
+      updateSelectionVisuals();
+    }
+
+    function getLaneCellIds(name){
+      const ids = [];
+      const rows = getRows(name);
+      const cols = getCols(name);
+      for(let rr = 1; rr <= rows; rr++){
+        for(let cc = 0; cc < cols; cc++) ids.push(makeId(name, cc, rr));
+      }
+      return ids;
+    }
+
+    function toggleLaneSelection(name){
+      const laneIds = getLaneCellIds(name);
+      const isFullySelected = laneIds.length > 0 && laneIds.every((id) => selectedIds.has(id));
+      if(isFullySelected){
+        laneIds.forEach((id) => selectedIds.delete(id));
+      } else {
+        laneIds.forEach((id) => selectedIds.add(id));
+      }
       updateSelectionVisuals();
     }
 
@@ -1242,7 +1311,7 @@
       hideTooltip();
       clearDragBox();
       if(pressTimer) clearTimeout(pressTimer);
-      pressTimer = window.setTimeout(()=>{
+      pressTimer = window.setTimeout(() => {
         pressLongFired = true;
         if(!selectedIds.has(id)) selectSingle(id);
         showCellActionMenu(id, e.clientX, e.clientY);
@@ -1300,6 +1369,14 @@
       if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
       autoScrollDirX = 0;
       autoScrollDirY = 0;
+      if(!id){
+        if(dragSelecting){
+          stopAutoScroll();
+          clearDragBox();
+          updateSelectionVisuals();
+        }
+        return;
+      }
       if(dragSelecting){
         stopAutoScroll();
         clearDragBox();
@@ -1319,8 +1396,7 @@
           && dt < 280
           && tapMove <= 18;
         if(canDoubleTapZoom){
-          const nextZoom = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
-          zoomScale = nextZoom;
+          zoomScale = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
           applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
           lastTouchUpX = 0;
@@ -1380,7 +1456,7 @@
         isApplyingRemoteState = true;
         try {
           Object.keys(cellData).forEach((k) => delete cellData[k]);
-          Object.entries(data.cellData || {}).forEach(([k,v]) => { cellData[k] = v; });
+          Object.entries(data.cellData || {}).forEach(([k, v]) => { cellData[k] = v; });
           if(typeof data.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, data.zoomScale));
           if(data.rate) rateSelect.value = String(data.rate);
           render();
@@ -1403,7 +1479,7 @@
         return;
       }
       snapshotState();
-      selectedIds.forEach((id)=>{
+      selectedIds.forEach((id) => {
         if(!cellData[id]) cellData[id] = {};
         if(entryDate.value) cellData[id].date = entryDate.value;
         else delete cellData[id].date;
@@ -1424,7 +1500,7 @@
     function toggleExtendSelection(){
       if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
       snapshotState();
-      selectedIds.forEach((id)=>{
+      selectedIds.forEach((id) => {
         if(!cellData[id]) cellData[id] = {};
         cellData[id].extend = !cellData[id].extend;
         if(!cellData[id].date && !cellData[id].extend && !cellData[id].size && !cellData[id].containerType) delete cellData[id];
@@ -1437,7 +1513,7 @@
     function deleteSelection(){
       if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
       snapshotState();
-      selectedIds.forEach((id)=> delete cellData[id]);
+      selectedIds.forEach((id) => delete cellData[id]);
       render();
       scheduleCloudSave();
     }
@@ -1447,8 +1523,8 @@
       redoStack.push(JSON.stringify(cellData));
       if(redoStack.length > 20) redoStack.shift();
       const prev = JSON.parse(historyStack.pop());
-      Object.keys(cellData).forEach(k => delete cellData[k]);
-      Object.entries(prev).forEach(([k,v]) => { cellData[k] = v; });
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.entries(prev).forEach(([k, v]) => { cellData[k] = v; });
       render();
       scheduleCloudSave();
     }
@@ -1458,16 +1534,15 @@
       historyStack.push(JSON.stringify(cellData));
       if(historyStack.length > 20) historyStack.shift();
       const next = JSON.parse(redoStack.pop());
-      Object.keys(cellData).forEach(k => delete cellData[k]);
-      Object.entries(next).forEach(([k,v]) => { cellData[k] = v; });
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.entries(next).forEach(([k, v]) => { cellData[k] = v; });
       render();
       scheduleCloudSave();
     }
 
     function resetAll(){
-      if(!confirm(`本当に初期化しますか？
-移植日・延長・選択状態が消えます。`)) return;
-      Object.keys(cellData).forEach(k => delete cellData[k]);
+      if(!confirm(`本当に初期化しますか？\n移植日・延長・選択状態が消えます。`)) return;
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
       selectedIds.clear();
       historyStack.length = 0;
       redoStack.length = 0;
@@ -1486,13 +1561,7 @@
         line.className = "line";
 
         const selectWholeLane = () => {
-          selectedIds.clear();
-          const rows = getRows(name);
-          const cols = getCols(name);
-          for(let rr=1; rr<=rows; rr++){
-            for(let cc=0; cc<cols; cc++) selectedIds.add(makeId(name, cc, rr));
-          }
-          updateSelectionVisuals();
+          toggleLaneSelection(name);
         };
 
         const title = document.createElement("div");
@@ -1526,8 +1595,8 @@
           );
         };
 
-        for(let r=1; r<=totalRows; r++){
-          for(let c=0; c<cols; c++){
+        for(let r = 1; r <= totalRows; r++){
+          for(let c = 0; c < cols; c++){
             const cell = document.createElement("div");
             const realRow = r - offset;
             const isBlank = realRow < 1 || realRow > rows;
@@ -1574,37 +1643,37 @@
       updateSelectionVisuals();
     }
 
-    zoomStage.addEventListener("pointerdown", (e)=>{
+    zoomStage.addEventListener("pointerdown", (e) => {
       const id = getCellIdFromEventTarget(e.target);
       if(!id) return;
       handleCellPointerDown(e, id);
     }, { passive: true });
 
-    zoomStage.addEventListener("pointermove", (e)=>{
+    zoomStage.addEventListener("pointermove", (e) => {
       const id = getCellIdFromEventTarget(e.target);
       if(!id && !activePointers.has(e.pointerId)) return;
       handleCellPointerMove(e);
     }, { passive: true });
 
-    zoomStage.addEventListener("pointerup", (e)=>{
+    zoomStage.addEventListener("pointerup", (e) => {
       const id = getCellIdFromEventTarget(e.target);
       if(!id && !activePointers.has(e.pointerId)) return;
       handleCellPointerUp(e, id || "");
     }, { passive: true });
 
-    zoomStage.addEventListener("pointerleave", (e)=>{
+    zoomStage.addEventListener("pointerleave", (e) => {
       const id = getCellIdFromEventTarget(e.target);
       if(!id) return;
       handleCellPointerLeave();
     }, { passive: true });
 
-    zoomStage.addEventListener("pointercancel", ()=>{
+    zoomStage.addEventListener("pointercancel", () => {
       handleCellPointerLeave();
       dragSelecting = false;
       stopAutoScroll();
     }, { passive: true });
 
-    layout.addEventListener("pointerdown", (e)=>{
+    layout.addEventListener("pointerdown", (e) => {
       if(moveMode){
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
         panLastX = e.clientX;
@@ -1640,7 +1709,7 @@
       if(pressTimer) clearTimeout(pressTimer);
     });
 
-    layout.addEventListener("pointermove", (e)=>{
+    layout.addEventListener("pointermove", (e) => {
       if(!activePointers.has(e.pointerId)) return;
       if(moveMode && activePointers.size < 2){
         const dx = e.clientX - panLastX;
@@ -1687,7 +1756,7 @@
       }
     });
 
-    layout.addEventListener("pointerup", (e)=>{
+    layout.addEventListener("pointerup", (e) => {
       if(!activePointers.has(e.pointerId)) return;
       activePointers.delete(e.pointerId);
       if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
@@ -1710,8 +1779,7 @@
         const dt = now - lastTapTime;
         const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
         if(dt > 0 && dt < 280 && tapMove <= 18){
-          const nextZoom = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
-          zoomScale = nextZoom;
+          zoomScale = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
           applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
           lastTouchUpX = 0;
@@ -1752,8 +1820,8 @@
       e.stopPropagation();
       moreMenuPanel.classList.toggle("open");
     });
-    rateSelect.addEventListener("change", ()=> { updateCounter(); scheduleCloudSave(); });
-    moveModeBtn.addEventListener("click", ()=>{
+    rateSelect.addEventListener("change", () => { updateCounter(); scheduleCloudSave(); });
+    moveModeBtn.addEventListener("click", () => {
       moveMode = !moveMode;
       if(moveMode){
         rectSelectMode = false;
@@ -1764,7 +1832,7 @@
       hideTooltip();
       updateMoveModeButton();
     });
-    rectModeBtn.addEventListener("click", ()=>{
+    rectModeBtn.addEventListener("click", () => {
       rectSelectMode = !rectSelectMode;
       if(rectSelectMode){
         moveMode = false;
@@ -1775,7 +1843,7 @@
       hideTooltip();
       updateRectModeButton();
     });
-    document.addEventListener("pointerdown", (e)=>{
+    document.addEventListener("pointerdown", (e) => {
       if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
       if(cellActionMenu && !e.target.closest("#cellActionMenu") && !e.target.closest(".cell")) closeCellActionMenu();
       if(!tooltipPinned) return;
@@ -1796,10 +1864,28 @@
       }
     });
 
-    window.addEventListener("resize", ()=> {
+    window.addEventListener("resize", () => {
       applyZoom(false);
       rebuildSelectableCellCache();
     });
+
+    function runDevChecks(){
+      console.assert(typeof updateSelectedCounter === "function", "updateSelectedCounter should exist");
+      console.assert(getReadyCount() === 0, "empty ready count should be 0");
+      console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" }) === true, "regular ready cell should count");
+      console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "ヒノキ" }) === false, "hinoki should not count");
+      console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "松" }) === false, "matsu should not count");
+      const parsed = parseCellId("P10-11-1-23");
+      console.assert(parsed && parsed.lane === "P10-11" && parsed.col === 1 && parsed.row === 23, "parseCellId should parse path ids");
+      const before = selectedIds.size;
+      selectSingle("");
+      console.assert(selectedIds.size === before, "empty id should not become selected");
+      selectedIds.clear();
+      toggleLaneSelection("L1");
+      console.assert(getLaneCellIds("L1").every((id) => selectedIds.has(id)), "lane tap should select full lane");
+      toggleLaneSelection("L1");
+      console.assert(getLaneCellIds("L1").every((id) => !selectedIds.has(id)), "second lane tap should clear same lane");
+    }
 
     if(isIPadSubMode) document.body.classList.add("ipad-sub");
     loadLocalState();
@@ -1810,6 +1896,7 @@
     render();
     applyZoom(false);
     updateSelectionVisuals();
+    runDevChecks();
     subscribeCloud();
 
     const requestedLane = getRequestedLane();
