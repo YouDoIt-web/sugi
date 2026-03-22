@@ -1085,6 +1085,15 @@
       layoutSpacer.style.height = `${scaledH + 800}px`;
     }
 
+    function clampScrollPosition(){
+      const maxLeft = Math.max(0, layout.scrollWidth - layout.clientWidth);
+      const maxTop = Math.max(0, layout.scrollHeight - layout.clientHeight);
+      if(layout.scrollLeft < 0) layout.scrollLeft = 0;
+      if(layout.scrollTop < 0) layout.scrollTop = 0;
+      if(layout.scrollLeft > maxLeft) layout.scrollLeft = maxLeft;
+      if(layout.scrollTop > maxTop) layout.scrollTop = maxTop;
+    }
+
     function rebuildSelectableCellCache(force = false){
       if(!force && !selectableCacheDirty && selectableCellCache.length) return;
       selectableCellCache = [];
@@ -1117,6 +1126,7 @@
         layout.scrollLeft = anchorContentX * zoomScale - viewportAnchorX;
         layout.scrollTop = anchorContentY * zoomScale - viewportAnchorY;
       }
+      clampScrollPosition();
 
       prevZoomScale = zoomScale;
       if(deferCache) scheduleCacheRebuild(isIPadSubMode ? 180 : 120);
@@ -1182,6 +1192,7 @@
       if(autoScrollDirY !== 0){
         const prevTop = layout.scrollTop;
         layout.scrollBy(0, autoScrollDirY * speedY);
+        clampScrollPosition();
         if(layout.scrollTop !== prevTop){
           dragCurrentY += autoScrollDirY * speedY;
           moved = true;
@@ -1191,6 +1202,7 @@
         const prevLeft = layout.scrollLeft;
         const maxLeft = Math.max(0, layout.scrollWidth - layout.clientWidth);
         layout.scrollLeft = Math.max(0, Math.min(maxLeft, layout.scrollLeft + autoScrollDirX * speedX));
+        clampScrollPosition();
         if(layout.scrollLeft !== prevLeft){
           dragCurrentX += autoScrollDirX * speedX;
           moved = true;
@@ -1223,6 +1235,7 @@
       if(hadPrevCenter){
         layout.scrollLeft -= (cx - lastCenterX);
         layout.scrollTop -= (cy - lastCenterY);
+        clampScrollPosition();
       }
 
       if(hadPrevDistance && dist > 0){
@@ -1338,6 +1351,7 @@
         const dy = e.clientY - panLastY;
         layout.scrollLeft -= dx;
         layout.scrollTop -= dy;
+        clampScrollPosition();
         panLastX = e.clientX;
         panLastY = e.clientY;
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -1733,6 +1747,7 @@
         const dy = e.clientY - panLastY;
         layout.scrollLeft -= dx;
         layout.scrollTop -= dy;
+        clampScrollPosition();
         panLastX = e.clientX;
         panLastY = e.clientY;
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -1883,6 +1898,7 @@
 
     window.addEventListener("resize", () => {
       applyZoom(false);
+      clampScrollPosition();
       rebuildSelectableCellCache();
     });
 
@@ -1894,6 +1910,10 @@
       console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "松" }) === false, "matsu should not count");
       const parsed = parseCellId("P10-11-1-23");
       console.assert(parsed && parsed.lane === "P10-11" && parsed.col === 1 && parsed.row === 23, "parseCellId should parse path ids");
+      layout.scrollTop = -50;
+      layout.scrollLeft = -50;
+      clampScrollPosition();
+      console.assert(layout.scrollTop === 0 && layout.scrollLeft === 0, "clampScrollPosition should keep scroll within bounds");
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: todayString() }) === true, "fresh extend frame should show");
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10) }) === false, "old extend frame should hide");
       Object.keys(cellData).forEach((k) => delete cellData[k]);
