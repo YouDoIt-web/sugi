@@ -1050,6 +1050,16 @@
       rectModeBtn.style.background = rectSelectMode ? "#00b894" : "#2d3436";
     }
 
+    function updateTouchInteractionMode(){
+      if(rectSelectMode){
+        layout.style.touchAction = "none";
+        zoomStage.style.touchAction = "none";
+      } else {
+        layout.style.touchAction = "pan-x pan-y";
+        zoomStage.style.touchAction = "manipulation";
+      }
+    }
+
     function markSelectableCacheDirty(){
       selectableCacheDirty = true;
     }
@@ -1851,6 +1861,7 @@
       clearDragBox();
       hideTooltip();
       updateRectModeButton();
+      updateTouchInteractionMode();
     });
     document.addEventListener("pointerdown", (e) => {
       if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
@@ -1937,6 +1948,7 @@
     prevZoomScale = 1;
     updateMoveModeButton();
     updateRectModeButton();
+    updateTouchInteractionMode();
     render();
     applyZoom(false);
     syncViewportFixedUi();
