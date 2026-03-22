@@ -399,6 +399,7 @@
       <div class="menu-wrap">
         <button id="moreMenuBtn" type="button" aria-label="メニュー">☰</button>
         <div id="moreMenuPanel">
+          <button id="summaryBtn" type="button">集計</button>
           <button id="copyBtn" type="button">コピー保存</button>
           <button id="pasteImportBtn" type="button">貼り付け読込</button>
           <button id="resetBtn" type="button">初期化</button>
@@ -445,6 +446,28 @@
   </div>
   <div id="selectionBox"></div>
   <div id="toast"></div>
+
+  <div id="summaryModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11550;display:none;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+    <div id="summaryBox" style="width:min(92vw,360px);background:#fff;border-radius:14px;padding:14px;box-sizing:border-box;box-shadow:0 10px 28px rgba(0,0,0,0.2);">
+      <h2 style="margin:0 0 12px;font-size:16px;">集計</h2>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;margin-bottom:12px;">
+        <label><input type="checkbox" class="summary-size" value="特大" checked> 特大</label>
+        <label><input type="checkbox" class="summary-size" value="大" checked> 大</label>
+        <label><input type="checkbox" class="summary-size" value="中" checked> 中</label>
+        <label><input type="checkbox" class="summary-size" value="挿" checked> 挿</label>
+        <label><input type="checkbox" class="summary-size" value="戻" checked> 戻</label>
+      </div>
+      <div id="summaryResult" style="background:#f5f7f8;border-radius:8px;padding:10px;font-size:14px;line-height:1.7;white-space:pre-line;">対象: 全体
+サイズ: 特大、大、中、挿、戻
+コンテナ数: 0
+苗数: 0</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+        <button id="summaryAllBtn" type="button">全選択</button>
+        <button id="summaryCloseBtn" type="button">閉じる</button>
+      </div>
+    </div>
+  </div>
+
 
   <div id="entryModal">
     <div id="entryBox">
@@ -551,6 +574,11 @@
     const pasteImportBtn = document.getElementById("pasteImportBtn");
     const moreMenuBtn = document.getElementById("moreMenuBtn");
     const moreMenuPanel = document.getElementById("moreMenuPanel");
+    const summaryBtn = document.getElementById("summaryBtn");
+    const summaryModal = document.getElementById("summaryModal");
+    const summaryResult = document.getElementById("summaryResult");
+    const summaryCloseBtn = document.getElementById("summaryCloseBtn");
+    const summaryAllBtn = document.getElementById("summaryAllBtn");
     const entryModal = document.getElementById("entryModal");
     const entryDate = document.getElementById("entryDate");
     const entrySize = document.getElementById("entrySize");
@@ -814,7 +842,65 @@
 
     function updateSelectedCounter(){
       updateCounter();
+      calcSummary();
     }
+    const SUMMARY_TARGET_SIZES = ["特大", "大", "中", "挿", "戻"];
+
+    function getSummaryTargetIds(){
+      return selectedIds.size > 1 ? getSortedSelectedIds() : Object.keys(cellData).sort(compareCellIds);
+    }
+
+    function getCheckedSummarySizes(){
+      return [...document.querySelectorAll(".summary-size:checked")].map((el) => el.value);
+    }
+
+    function setAllSummaryChecks(checked){
+      document.querySelectorAll(".summary-size").forEach((el) => {
+        el.checked = checked;
+      });
+    }
+
+    function calcSummary(){
+      if(!summaryResult) return;
+      const checkedSizes = getCheckedSummarySizes();
+      const targetIds = getSummaryTargetIds();
+      const rate = parseFloat(rateSelect.value || 0);
+      const counts = Object.fromEntries(SUMMARY_TARGET_SIZES.map((size) => [size, 0]));
+
+      targetIds.forEach((id) => {
+        const size = cellData[id]?.size;
+        if(!checkedSizes.includes(size)) return;
+        if(!(size in counts)) return;
+        counts[size] += 1;
+      });
+
+      const totalCount = Object.values(counts).reduce((sum, value) => sum + value, 0);
+      const seedlings = Math.floor(totalCount * 40 * rate);
+      const scopeText = selectedIds.size > 1 ? "選択範囲" : "全体";
+      const detailText = checkedSizes.length
+        ? checkedSizes.map((size) => `${size}: ${counts[size] || 0}`).join(" / ")
+        : "なし";
+
+      summaryResult.textContent = [
+        `対象: ${scopeText}`,
+        `サイズ: ${checkedSizes.length ? checkedSizes.join("、") : "なし"}`,
+        `コンテナ数: ${totalCount}`,
+        `苗数: ${seedlings}`,
+        `内訳: ${detailText}`
+      ].join("
+");
+    }
+
+    function openSummaryModal(){
+      closeMoreMenu();
+      calcSummary();
+      summaryModal.style.display = "flex";
+    }
+
+    function closeSummaryModal(){
+      if(summaryModal) summaryModal.style.display = "none";
+    }
+
 
     function saveLocalState(){
       try {
@@ -1875,6 +1961,16 @@
     });
 
     entryCancelBtn.addEventListener("click", closeEntryModal);
+    summaryBtn.addEventListener("click", openSummaryModal);
+    summaryCloseBtn.addEventListener("click", closeSummaryModal);
+    summaryAllBtn.addEventListener("click", () => {
+      const checkedCount = document.querySelectorAll(".summary-size:checked").length;
+      setAllSummaryChecks(checkedCount !== SUMMARY_TARGET_SIZES.length);
+      calcSummary();
+    });
+    document.querySelectorAll(".summary-size").forEach((el) => {
+      el.addEventListener("change", calcSummary);
+    });
     longPressCopyBtn.addEventListener("click", () => {
       if(longPressMenuCellId && !selectedIds.has(longPressMenuCellId)) selectSingle(longPressMenuCellId);
       const ok = copySelectedCellData();
@@ -1889,6 +1985,9 @@
     entryModal.addEventListener("click", (e) => {
       if(e.target === entryModal) closeEntryModal();
     });
+    summaryModal.addEventListener("click", (e) => {
+      if(e.target === summaryModal) closeSummaryModal();
+    });
     setDateBtn.addEventListener("click", openDateModal);
     extendBtn.addEventListener("click", toggleExtendSelection);
     undoBtn.addEventListener("click", undoLast);
@@ -1902,7 +2001,7 @@
       e.stopPropagation();
       moreMenuPanel.classList.toggle("open");
     });
-    rateSelect.addEventListener("change", () => { updateCounter(); scheduleCloudSave(); });
+    rateSelect.addEventListener("change", () => { updateCounter(); calcSummary(); scheduleCloudSave(); });
     moveModeBtn.addEventListener("click", () => {
       moveMode = !moveMode;
       if(moveMode){
@@ -1927,6 +2026,7 @@
     });
     document.addEventListener("pointerdown", (e) => {
       if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
+      if(summaryModal && summaryModal.style.display === "flex" && !e.target.closest("#summaryBox") && !e.target.closest("#summaryBtn")) closeSummaryModal();
       if(cellActionMenu && !e.target.closest("#cellActionMenu") && !e.target.closest(".cell")) closeCellActionMenu();
       if(!tooltipPinned) return;
       if(e.target.closest && e.target.closest(".cell") && pressLongFired) return;
