@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light only" />
-  <title>杉苗管理 v13</title>
+  <title>杉苗管理 v14</title>
   <style>
     :root { color-scheme: light only; }
     body {
@@ -258,6 +258,39 @@
       max-width: min(320px, calc(100vw - 20px));
       box-shadow: 0 4px 12px rgba(0,0,0,0.25);
     }
+    #cellActionMenu {
+      position: fixed;
+      display: none;
+      z-index: 12000;
+      background: rgba(255,255,255,0.98);
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      padding: 8px;
+      width: min(220px, calc(100vw - 24px));
+      box-sizing: border-box;
+    }
+    #cellActionMenu.open { display: block; }
+    #cellActionInfo {
+      background: #f5f7f8;
+      color: #2d3436;
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: normal;
+      word-break: break-word;
+    }
+    #cellActionMenu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 0 0 6px;
+      background: #2d3436;
+      border-radius: 8px;
+      box-shadow: none;
+    }
+    #cellActionMenu button:last-child { margin-bottom: 0; }
     #selectionBox {
       position: fixed;
       display: none;
@@ -385,6 +418,11 @@
 
   <div id="layout"><div id="zoomStage"></div><div id="layoutSpacer"></div></div>
   <div id="tooltip"></div>
+  <div id="cellActionMenu">
+    <div id="cellActionInfo">移植情報未入力</div>
+    <button id="longPressCopyBtn" type="button">コピー</button>
+    <button id="longPressPasteBtn" type="button">貼り付け</button>
+  </div>
   <div id="selectionBox"></div>
   <div id="toast"></div>
 
@@ -438,7 +476,9 @@
     const db = getFirestore(app);
     const cloudRef = doc(db, "sugi", "state");
 
-    const STORAGE_KEY = "sugi_lane_manager_state_v13";
+    const STORAGE_KEY = "sugi_lane_manager_state_v14";
+    const CELL_CLIPBOARD_KEY = "sugi_lane_manager_cell_clipboard_v14";
+    const RANGE_CLIPBOARD_VERSION = 2;
     const MONTH1_DAYS = 30;
     const MONTH2_DAYS = 60;
     const MONTH3_DAYS = 90;
@@ -456,6 +496,7 @@
     let selectableCellCache = [];
     let selectableCacheDirty = true;
     let prevSelectedVisualIds = new Set();
+    let cellClipboard = null;
     const isIPadSubMode = (() => {
       const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
       const longSide = Math.max(window.innerWidth || 0, window.innerHeight || 0);
@@ -470,6 +511,7 @@
     const zoomStage = document.getElementById("zoomStage");
     const layoutSpacer = document.getElementById("layoutSpacer");
     const tooltip = document.getElementById("tooltip");
+    const cellActionMenu = document.getElementById("cellActionMenu");
     const selectionBox = document.getElementById("selectionBox");
     const toast = document.getElementById("toast");
     const setDateBtn = document.getElementById("setDateBtn");
@@ -491,6 +533,9 @@
     const entryContainer = document.getElementById("entryContainer");
     const entryCancelBtn = document.getElementById("entryCancelBtn");
     const entrySaveBtn = document.getElementById("entrySaveBtn");
+    const longPressCopyBtn = document.getElementById("longPressCopyBtn");
+    const longPressPasteBtn = document.getElementById("longPressPasteBtn");
+    const cellActionInfo = document.getElementById("cellActionInfo");
 
     let rectSelectMode = false;
     let moveMode = false;
@@ -526,6 +571,10 @@
     let baseStageWidth = 1;
     let baseStageHeight = 1;
     let cacheRebuildTimer = 0;
+    let longPressMenuCellId = "";
+    let recentTouchScrollUntil = 0;
+    let lastTouchUpX = 0;
+    let lastTouchUpY = 0;
 
     function isLane(name){ return name.startsWith("L"); }
     function getRows(name){ return isLane(name) ? (laneLengths[Number(name.slice(1))] || 67) : (pathLengths[name] || 67); }
@@ -533,8 +582,143 @@
     function makeId(name,colIndex,row){ return `${name}-${colIndex}-${row}`; }
     function daysSince(dateStr){ return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000); }
 
+    function parseCellId(id){
+      const parts = String(id || "").split("-");
+      if(parts.length < 3) return null;
+      const row = Number(parts.pop());
+      const col = Number(parts.pop());
+      const lane = parts.join("-");
+      if(!lane || !Number.isFinite(col) || !Number.isFinite(row)) return null;
+      return { lane, col, row };
+    }
+
+    function getSortedSelectedIds(){
+      return [...selectedIds].sort((a, b) => compareCellIds(a, b));
+    }
+
+    function compareCellIds(a, b){
+      const pa = parseCellId(a);
+      const pb = parseCellId(b);
+      const laneA = pa ? layoutOrder.indexOf(pa.lane) : Number.MAX_SAFE_INTEGER;
+      const laneB = pb ? layoutOrder.indexOf(pb.lane) : Number.MAX_SAFE_INTEGER;
+      if(laneA !== laneB) return laneA - laneB;
+      if((pa?.row || 0) !== (pb?.row || 0)) return (pa?.row || 0) - (pb?.row || 0);
+      return (pa?.col || 0) - (pb?.col || 0);
+    }
+
+    function getSelectionAnchor(idsIterable = selectedIds){
+      const ids = [...idsIterable].filter(Boolean);
+      if(ids.length === 0) return null;
+      ids.sort(compareCellIds);
+      const parsed = parseCellId(ids[0]);
+      if(!parsed) return null;
+      return parsed;
+    }
+
+    function buildRangeClipboardFromSelection(){
+      const ids = getSortedSelectedIds();
+      if(ids.length === 0) return null;
+      const anchor = getSelectionAnchor(ids);
+      if(!anchor) return null;
+      const items = [];
+      ids.forEach((id) => {
+        const pos = parseCellId(id);
+        if(!pos) return;
+        const value = cloneCellValue(cellData[id]);
+        if(!value) return;
+        items.push({
+          sourceId: id,
+          laneOffset: layoutOrder.indexOf(pos.lane) - layoutOrder.indexOf(anchor.lane),
+          colOffset: pos.col - anchor.col,
+          rowOffset: pos.row - anchor.row,
+          data: value,
+        });
+      });
+      if(items.length === 0) return null;
+      return {
+        version: RANGE_CLIPBOARD_VERSION,
+        copiedAt: Date.now(),
+        anchor: { lane: anchor.lane, col: anchor.col, row: anchor.row },
+        items,
+      };
+    }
+
+    function resolveClipboardTargetIds(clipboard, targetAnchor){
+      if(!clipboard || !clipboard.items || !targetAnchor) return [];
+      const targetLaneIndex = layoutOrder.indexOf(targetAnchor.lane);
+      if(targetLaneIndex < 0) return [];
+      const resolved = [];
+      clipboard.items.forEach((item) => {
+        const laneIndex = targetLaneIndex + Number(item.laneOffset || 0);
+        if(laneIndex < 0 || laneIndex >= layoutOrder.length) return;
+        const lane = layoutOrder[laneIndex];
+        const col = targetAnchor.col + Number(item.colOffset || 0);
+        const row = targetAnchor.row + Number(item.rowOffset || 0);
+        const cols = getCols(lane);
+        const rows = getRows(lane);
+        if(col < 0 || col >= cols || row < 1 || row > rows) return;
+        resolved.push({ id: makeId(lane, col, row), data: cloneCellValue(item.data) });
+      });
+      return resolved;
+    }
+
+    function cloneCellValue(value){
+      if(!value || typeof value !== "object") return null;
+      const cloned = {};
+      if(value.date) cloned.date = value.date;
+      if(value.size) cloned.size = value.size;
+      if(value.containerType) cloned.containerType = value.containerType;
+      if(value.extend) cloned.extend = true;
+      return Object.keys(cloned).length ? cloned : null;
+    }
+
+    function saveCellClipboard(){
+      try {
+        if(cellClipboard) localStorage.setItem(CELL_CLIPBOARD_KEY, JSON.stringify(cellClipboard));
+        else localStorage.removeItem(CELL_CLIPBOARD_KEY);
+      } catch (e) {
+        console.warn("save clipboard failed", e);
+      }
+    }
+
+    function loadCellClipboard(){
+      try {
+        const raw = localStorage.getItem(CELL_CLIPBOARD_KEY);
+        if(!raw) return;
+        const parsed = JSON.parse(raw);
+        if(!parsed || typeof parsed !== "object") return;
+        if(Array.isArray(parsed.items) && parsed.items.length > 0) {
+          cellClipboard = parsed;
+          return;
+        }
+        if(parsed.data && typeof parsed.data === "object") {
+          cellClipboard = {
+            version: 1,
+            copiedAt: parsed.copiedAt || Date.now(),
+            anchor: (() => {
+              const pos = parseCellId(parsed.sourceId || "");
+              return pos ? { lane: pos.lane, col: pos.col, row: pos.row } : null;
+            })(),
+            items: [{
+              sourceId: parsed.sourceId || "",
+              laneOffset: 0,
+              colOffset: 0,
+              rowOffset: 0,
+              data: cloneCellValue(parsed.data),
+            }].filter((item) => item.data),
+          };
+        }
+      } catch (e) {
+        console.warn("load clipboard failed", e);
+      }
+    }
+
     function closeMoreMenu(){ if(moreMenuPanel) moreMenuPanel.classList.remove("open"); }
     function closeEntryModal(){ if(entryModal) entryModal.style.display = "none"; }
+    function closeCellActionMenu(){
+      longPressMenuCellId = "";
+      if(cellActionMenu) cellActionMenu.classList.remove("open");
+    }
 
     function showToast(msg){
       toast.textContent = msg;
@@ -646,6 +830,56 @@
       }
     }
 
+    function copySelectedCellData(){
+      if(selectedIds.size === 0){
+        alert("コピー元のセルを選択してください");
+        return false;
+      }
+      const nextClipboard = buildRangeClipboardFromSelection();
+      if(!nextClipboard){
+        alert("コピー元選択内に情報がありません");
+        return false;
+      }
+      cellClipboard = nextClipboard;
+      saveCellClipboard();
+      showToast(`${cellClipboard.items.length}セル分を範囲コピーしました`);
+      return true;
+    }
+
+    function pasteToSelectedCells(){
+      if(!cellClipboard || !Array.isArray(cellClipboard.items) || cellClipboard.items.length === 0){
+        alert("先にセルコピーしてください");
+        return false;
+      }
+      if(selectedIds.size === 0){
+        alert("貼り付け先の基準セルを選択してください");
+        return false;
+      }
+      const targetAnchor = getSelectionAnchor(selectedIds);
+      if(!targetAnchor){
+        alert("貼り付け先の基準セルを選択してください");
+        return false;
+      }
+      const targets = resolveClipboardTargetIds(cellClipboard, targetAnchor);
+      if(targets.length === 0){
+        alert("貼り付けできる範囲がありません");
+        return false;
+      }
+      snapshotState();
+      const pastedIds = [];
+      targets.forEach(({ id, data }) => {
+        if(!data) return;
+        cellData[id] = data;
+        pastedIds.push(id);
+      });
+      selectedIds.clear();
+      pastedIds.forEach((id) => selectedIds.add(id));
+      render();
+      scheduleCloudSave();
+      showToast(`${pastedIds.length}セルを相対位置で貼り付けました`);
+      return true;
+    }
+
     function centerLaneByName(name){
       const normalized = String(name || "").trim().toUpperCase();
       const titles = [...document.querySelectorAll(".title")];
@@ -691,6 +925,38 @@
       tooltip.style.left = `${left}px`;
       tooltip.style.top = `${top}px`;
       tooltipPinned = true;
+    }
+
+    function getCellInfoText(id){
+      const storedData = cellData[id];
+      if(storedData && (storedData.date || storedData.size || storedData.containerType || storedData.extend)) {
+        const parts = [];
+        if(storedData.date) parts.push(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`);
+        if(storedData.size) parts.push(`サイズ: ${storedData.size}`);
+        if(storedData.containerType) parts.push(`コンテナ: ${storedData.containerType}`);
+        if(storedData.extend) parts.push(`延長: +1ヶ月`);
+        return parts.join(" / ");
+      }
+      return "移植情報未入力";
+    }
+
+    function showCellActionMenu(id, x, y){
+      if(!id || !cellActionMenu) return;
+      closeMoreMenu();
+      hideTooltip();
+      longPressMenuCellId = id;
+      if(cellActionInfo) cellActionInfo.textContent = getCellInfoText(id);
+      cellActionMenu.classList.add("open");
+      const margin = 10;
+      const rect = cellActionMenu.getBoundingClientRect();
+      let left = x + 10;
+      let top = y - 10;
+      if(left + rect.width > window.innerWidth - margin) left = window.innerWidth - rect.width - margin;
+      if(left < margin) left = margin;
+      if(top + rect.height > window.innerHeight - margin) top = window.innerHeight - rect.height - margin;
+      if(top < margin) top = margin;
+      cellActionMenu.style.left = `${left}px`;
+      cellActionMenu.style.top = `${top}px`;
     }
 
     function hideTooltip(){ tooltip.style.display = "none"; tooltipPinned = false; }
@@ -885,6 +1151,7 @@
 
     function updateTwoFingerScroll(){
       suppressDoubleTapUntil = Date.now() + 350;
+      recentTouchScrollUntil = Date.now() + 500;
       if(activePointers.size !== 2) return;
       const pts = [...activePointers.values()];
       const cx = (pts[0].x + pts[1].x) / 2;
@@ -977,17 +1244,8 @@
       if(pressTimer) clearTimeout(pressTimer);
       pressTimer = window.setTimeout(()=>{
         pressLongFired = true;
-        const storedData = cellData[id];
-        if(storedData && (storedData.date || storedData.size || storedData.containerType || storedData.extend)) {
-          const parts = [];
-          if(storedData.date) parts.push(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`);
-          if(storedData.size) parts.push(`サイズ: ${storedData.size}`);
-          if(storedData.containerType) parts.push(`コンテナ: ${storedData.containerType}`);
-          if(storedData.extend) parts.push(`延長: +1ヶ月`);
-          showTooltip(parts.join(" / "), e.clientX, e.clientY);
-        } else {
-          showTooltip("移植情報未入力", e.clientX, e.clientY);
-        }
+        if(!selectedIds.has(id)) selectSingle(id);
+        showCellActionMenu(id, e.clientX, e.clientY);
       }, 600);
     }
 
@@ -1000,6 +1258,7 @@
         panLastX = e.clientX;
         panLastY = e.clientY;
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+        if(e.pointerType === "touch" && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) recentTouchScrollUntil = Date.now() + 450;
         return;
       }
       if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
@@ -1016,6 +1275,7 @@
       const dy = Math.abs(e.clientY - pressStartY);
       if(dx > 8 || dy > 8){
         pressMoved = true;
+        if(e.pointerType === "touch") recentTouchScrollUntil = Date.now() + 450;
         if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
       }
       if(pressMoved && !pressLongFired && rectSelectMode){
@@ -1052,14 +1312,24 @@
           return;
         }
         const dt = now - lastTapTime;
-        if(e.pointerType === "touch" && dt > 0 && dt < 280){
+        const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
+        const canDoubleTapZoom = e.pointerType === "touch"
+          && now >= recentTouchScrollUntil
+          && dt > 0
+          && dt < 280
+          && tapMove <= 18;
+        if(canDoubleTapZoom){
           const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
           zoomScale = nextZoom;
           applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
+          lastTouchUpX = 0;
+          lastTouchUpY = 0;
           return;
         }
         lastTapTime = now;
+        lastTouchUpX = e.clientX;
+        lastTouchUpY = e.clientY;
         selectSingle(id);
       }
     }
@@ -1273,6 +1543,7 @@
             const stored = cellData[id];
             const growthClass = getGrowthClass(stored);
             if(growthClass) cell.classList.add(growthClass);
+            if(stored && stored.extend) cell.classList.add("extend-cell");
             if(selectedIds.has(id)) cell.classList.add("selected");
             if(hasSameGroupNeighbor(c, realRow, -1, 0)) cell.classList.add("merge-left");
             if(hasSameGroupNeighbor(c, realRow, 1, 0)) cell.classList.add("merge-right");
@@ -1379,6 +1650,7 @@
         panLastX = e.clientX;
         panLastY = e.clientY;
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+        if(e.pointerType === "touch" && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) recentTouchScrollUntil = Date.now() + 450;
         return;
       }
       if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
@@ -1396,6 +1668,7 @@
       const dy = Math.abs(e.clientY - pressStartY);
       if(dx > 8 || dy > 8){
         pressMoved = true;
+        if(e.pointerType === "touch") recentTouchScrollUntil = Date.now() + 450;
         if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
       }
       if(pressMoved && rectSelectMode){
@@ -1428,23 +1701,40 @@
       }
       if(!moveMode && e.pointerType === "touch"){
         const now = Date.now();
-        if(now < suppressDoubleTapUntil){
+        if(now < suppressDoubleTapUntil || now < recentTouchScrollUntil){
           lastTapTime = 0;
+          lastTouchUpX = e.clientX;
+          lastTouchUpY = e.clientY;
           return;
         }
         const dt = now - lastTapTime;
-        if(dt > 0 && dt < 280){
+        const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
+        if(dt > 0 && dt < 280 && tapMove <= 18){
           const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
           zoomScale = nextZoom;
           applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
+          lastTouchUpX = 0;
+          lastTouchUpY = 0;
           return;
         }
         lastTapTime = now;
+        lastTouchUpX = e.clientX;
+        lastTouchUpY = e.clientY;
       }
     });
 
     entryCancelBtn.addEventListener("click", closeEntryModal);
+    longPressCopyBtn.addEventListener("click", () => {
+      if(longPressMenuCellId && !selectedIds.has(longPressMenuCellId)) selectSingle(longPressMenuCellId);
+      const ok = copySelectedCellData();
+      if(ok) closeCellActionMenu();
+    });
+    longPressPasteBtn.addEventListener("click", () => {
+      if(longPressMenuCellId && !selectedIds.has(longPressMenuCellId)) selectSingle(longPressMenuCellId);
+      const ok = pasteToSelectedCells();
+      if(ok) closeCellActionMenu();
+    });
     entrySaveBtn.addEventListener("click", applyDateToSelection);
     entryModal.addEventListener("click", (e) => {
       if(e.target === entryModal) closeEntryModal();
@@ -1487,10 +1777,25 @@
     });
     document.addEventListener("pointerdown", (e)=>{
       if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
+      if(cellActionMenu && !e.target.closest("#cellActionMenu") && !e.target.closest(".cell")) closeCellActionMenu();
       if(!tooltipPinned) return;
       if(e.target.closest && e.target.closest(".cell") && pressLongFired) return;
       hideTooltip();
     });
+
+    document.addEventListener("keydown", (e) => {
+      if(e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA")) return;
+      const key = String(e.key || "").toLowerCase();
+      if((e.ctrlKey || e.metaKey) && key === "c"){
+        e.preventDefault();
+        copySelectedCellData();
+      }
+      if((e.ctrlKey || e.metaKey) && key === "v"){
+        e.preventDefault();
+        pasteToSelectedCells();
+      }
+    });
+
     window.addEventListener("resize", ()=> {
       applyZoom(false);
       rebuildSelectableCellCache();
@@ -1498,6 +1803,7 @@
 
     if(isIPadSubMode) document.body.classList.add("ipad-sub");
     loadLocalState();
+    loadCellClipboard();
     prevZoomScale = zoomScale;
     updateMoveModeButton();
     updateRectModeButton();
