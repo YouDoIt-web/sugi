@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta id="viewportMeta" name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light only" />
   <title>杉苗管理 v14</title>
   <style>
@@ -526,6 +526,7 @@
     })();
     const disableDoubleTapZoom = isIPadSubMode;
 
+    const viewportMeta = document.getElementById("viewportMeta");
     const counter = document.getElementById("counter");
     const rateSelect = document.getElementById("rateSelect");
     const calcResult = document.getElementById("calcResult");
@@ -1469,25 +1470,27 @@
       if(!disableDoubleTapZoom) return;
       const target = layout;
       if(!target) return;
+      if(viewportMeta){
+        viewportMeta.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover");
+      }
+      target.style.touchAction = "manipulation";
       target.addEventListener("touchend", (e) => {
         if(!e.changedTouches || e.changedTouches.length !== 1) return;
         const touch = e.changedTouches[0];
         const now = Date.now();
         const dt = now - lastSafariTouchEndTime;
         const move = Math.hypot(touch.clientX - lastSafariTouchEndX, touch.clientY - lastSafariTouchEndY);
-        const tappedCell = e.target && e.target.closest ? e.target.closest(".cell") : null;
-        const inInteractiveArea = !!tappedCell || target.contains(e.target);
+        const inInteractiveArea = target.contains(e.target);
+        if(inInteractiveArea){
+          e.preventDefault();
+        }
         if(inInteractiveArea && dt > 0 && dt < 320 && move < 24){
           e.preventDefault();
         }
         lastSafariTouchEndTime = now;
         lastSafariTouchEndX = touch.clientX;
         lastSafariTouchEndY = touch.clientY;
-      }, { passive: false });
-
-      target.addEventListener("touchstart", (e) => {
-        if(e.touches && e.touches.length > 1) return;
-      }, { passive: true });
+      }, { passive: false, capture: true });
     }
 
     function openDateModal(){
@@ -1970,6 +1973,7 @@
       console.assert(typeof applySafeDoubleTapZoom === "function", "safe double tap zoom helper should exist");
       console.assert(typeof disableDoubleTapZoom === "boolean", "disableDoubleTapZoom flag should exist");
       console.assert(typeof installSafariDoubleTapBlocker === "function", "safari double tap blocker should exist");
+      console.assert(!!viewportMeta, "viewport meta should exist");
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: todayString() }) === true, "fresh extend frame should show");
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10) }) === false, "old extend frame should hide");
       Object.keys(cellData).forEach((k) => delete cellData[k]);
