@@ -775,20 +775,21 @@
     function applyZoom(centered = false, anchorClientX = null, anchorClientY = null, deferCache = false){
       if(!Number.isFinite(zoomScale) || zoomScale <= 0) zoomScale = 1;
       const rect = layout.getBoundingClientRect();
-      let anchorX = layout.scrollLeft + rect.width / 2;
-      let anchorY = layout.scrollTop + rect.height / 2;
-      if(anchorClientX != null && anchorClientY != null){
-        anchorX = layout.scrollLeft + (anchorClientX - rect.left);
-        anchorY = layout.scrollTop + (anchorClientY - rect.top);
-      }
+      const viewportAnchorX = anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2;
+      const viewportAnchorY = anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2;
+      const safePrevScale = prevZoomScale > 0 ? prevZoomScale : 1;
+      const anchorContentX = (layout.scrollLeft + viewportAnchorX) / safePrevScale;
+      const anchorContentY = (layout.scrollTop + viewportAnchorY) / safePrevScale;
+
       zoomStage.style.transformOrigin = "0 0";
       zoomStage.style.transform = `scale(${zoomScale})`;
       updateLayoutViewport();
-      if(centered && prevZoomScale > 0){
-        const ratio = zoomScale / prevZoomScale;
-        layout.scrollLeft = anchorX * ratio - (anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2);
-        layout.scrollTop = anchorY * ratio - (anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2);
+
+      if(centered){
+        layout.scrollLeft = anchorContentX * zoomScale - viewportAnchorX;
+        layout.scrollTop = anchorContentY * zoomScale - viewportAnchorY;
       }
+
       prevZoomScale = zoomScale;
       if(deferCache) scheduleCacheRebuild(isIPadSubMode ? 180 : 120);
       else rebuildSelectableCellCache(true);
@@ -889,11 +890,15 @@
       const cx = (pts[0].x + pts[1].x) / 2;
       const cy = (pts[0].y + pts[1].y) / 2;
       const dist = getTwoFingerDistance();
-      if(lastCenterX || lastCenterY){
-        layout.scrollLeft -= (cx - lastCenterX) * 1.2;
-        layout.scrollTop -= (cy - lastCenterY) * 1.2;
+      const hadPrevCenter = lastCenterX !== 0 || lastCenterY !== 0;
+      const hadPrevDistance = lastPinchDistance > 0;
+
+      if(hadPrevCenter){
+        layout.scrollLeft -= (cx - lastCenterX);
+        layout.scrollTop -= (cy - lastCenterY);
       }
-      if(lastPinchDistance > 0 && dist > 0){
+
+      if(hadPrevDistance && dist > 0){
         const ratio = dist / lastPinchDistance;
         const delta = Math.abs(dist - lastPinchDistance);
         if(delta > 3 && Math.abs(ratio - 1) > 0.004){
