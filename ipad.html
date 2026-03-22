@@ -52,16 +52,6 @@
       background: linear-gradient(to top, rgba(238,242,245,0.98), rgba(238,242,245,0.9), rgba(238,242,245,0));
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
-    }
-    body.ipad-sub .toolbar {
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      background: linear-gradient(to top, rgba(238,242,245,0.99), rgba(238,242,245,0.97), rgba(238,242,245,0.88));
-    }
-    body.ipad-sub .title,
-    body.ipad-sub #moreMenuPanel,
-    body.ipad-sub #toast {
-      box-shadow: none;
       box-sizing: border-box;
       overflow-x: auto;
     }
@@ -452,15 +442,7 @@
     const cellData = {};
     const historyStack = [];
     const redoStack = [];
-    const cellElements = new Map();
     let selectableCellCache = [];
-    let selectableCacheDirty = true;
-    let prevSelectedVisualIds = new Set();
-    const isIPadSubMode = (() => {
-      const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-      const longSide = Math.max(window.innerWidth || 0, window.innerHeight || 0);
-      return coarse && longSide >= 900;
-    })();
 
     const counter = document.getElementById("counter");
     const rateSelect = document.getElementById("rateSelect");
@@ -523,9 +505,6 @@
     let dragSelectionLastUpdate = 0;
     let lastTapTime = 0;
     let suppressDoubleTapUntil = 0;
-    let baseStageWidth = 1;
-    let baseStageHeight = 1;
-    let cacheRebuildTimer = 0;
 
     function isLane(name){ return name.startsWith("L"); }
     function getRows(name){ return isLane(name) ? (laneLengths[Number(name.slice(1))] || 67) : (pathLengths[name] || 67); }
@@ -711,109 +690,68 @@
       rectModeBtn.style.background = rectSelectMode ? "#00b894" : "#2d3436";
     }
 
-    function markSelectableCacheDirty(){
-      selectableCacheDirty = true;
-    }
-
-    function getCellElement(id){
-      return cellElements.get(id) || null;
-    }
-
-    function getCellIdFromEventTarget(target){
-      if(!target || !target.closest) return "";
-      const cell = target.closest(".cell[data-cell-id]");
-      return cell ? cell.dataset.cellId || "" : "";
-    }
-
-    function updateActivePointersForEvent(e){
-      if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-    }
-
-    function updateBaseStageMetrics(){
-      baseStageWidth = zoomStage.scrollWidth || zoomStage.offsetWidth || 1;
-      baseStageHeight = zoomStage.scrollHeight || zoomStage.offsetHeight || 1;
-    }
-
-    function scheduleCacheRebuild(delay = 120){
-      markSelectableCacheDirty();
-      if(cacheRebuildTimer) clearTimeout(cacheRebuildTimer);
-      cacheRebuildTimer = setTimeout(() => {
-        cacheRebuildTimer = 0;
-        rebuildSelectableCellCache(true);
-      }, delay);
-    }
-
     function updateLayoutViewport(){
       const top = layout.getBoundingClientRect().top;
       const safeBottom = 16;
       const h = Math.max(240, window.innerHeight - top - safeBottom);
       layout.style.height = `${h}px`;
-      const scaledW = Math.ceil(baseStageWidth * zoomScale);
-      const scaledH = Math.ceil(baseStageHeight * zoomScale);
+      const baseW = zoomStage.offsetWidth || 1;
+      const baseH = zoomStage.offsetHeight || 1;
+      const scaledW = Math.ceil(baseW * zoomScale);
+      const scaledH = Math.ceil(baseH * zoomScale);
       const extraBottom = Math.max(Math.round(window.innerHeight * 1.1), Math.round(420 * zoomScale));
       layout.style.paddingBottom = `${extraBottom}px`;
       layout.style.paddingRight = `0px`;
-      layoutSpacer.style.width = `${Math.max(1, scaledW)}px`;
+      layoutSpacer.style.width = `1px`;
       layoutSpacer.style.height = `${scaledH + 800}px`;
     }
 
-    function rebuildSelectableCellCache(force = false){
-      if(!force && !selectableCacheDirty && selectableCellCache.length) return;
-      selectableCellCache = [];
-      cellElements.forEach((el, id) => {
-        selectableCellCache.push({
-          id,
-          left: el.offsetLeft,
-          top: el.offsetTop,
-          right: el.offsetLeft + el.offsetWidth,
-          bottom: el.offsetTop + el.offsetHeight,
-        });
+    function rebuildSelectableCellCache(){
+      const stageRect = zoomStage.getBoundingClientRect();
+      selectableCellCache = [...document.querySelectorAll('.cell[data-cell-id]')].map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          id: el.dataset.cellId,
+          left: (r.left - stageRect.left) / zoomScale,
+          top: (r.top - stageRect.top) / zoomScale,
+          right: (r.right - stageRect.left) / zoomScale,
+          bottom: (r.bottom - stageRect.top) / zoomScale,
+        };
       });
-      selectableCacheDirty = false;
     }
 
-    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null, deferCache = false){
+    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null){
       if(!Number.isFinite(zoomScale) || zoomScale <= 0) zoomScale = 1;
-      const rect = layout.getBoundingClientRect();
-      const viewportAnchorX = anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2;
-      const viewportAnchorY = anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2;
-      const safePrevScale = prevZoomScale > 0 ? prevZoomScale : 1;
-      const anchorContentX = (layout.scrollLeft + viewportAnchorX) / safePrevScale;
-      const anchorContentY = (layout.scrollTop + viewportAnchorY) / safePrevScale;
-
+      const prevLeft = layout.scrollLeft;
+      const prevTop = layout.scrollTop;
       zoomStage.style.transformOrigin = "0 0";
       zoomStage.style.transform = `scale(${zoomScale})`;
       updateLayoutViewport();
-
-      if(centered){
-        layout.scrollLeft = anchorContentX * zoomScale - viewportAnchorX;
-        layout.scrollTop = anchorContentY * zoomScale - viewportAnchorY;
-      }
-
+      rebuildSelectableCellCache();
+      layout.scrollLeft = prevLeft;
+      layout.scrollTop = prevTop;
       prevZoomScale = zoomScale;
-      if(deferCache) scheduleCacheRebuild(isIPadSubMode ? 180 : 120);
-      else rebuildSelectableCellCache(true);
     }
 
     function clientToContent(clientX, clientY){
-      const rect = layout.getBoundingClientRect();
+      const stageRect = zoomStage.getBoundingClientRect();
       return {
-        x: (layout.scrollLeft + clientX - rect.left) / zoomScale,
-        y: (layout.scrollTop + clientY - rect.top) / zoomScale,
+        x: (clientX - stageRect.left) / zoomScale,
+        y: (clientY - stageRect.top) / zoomScale,
       };
     }
 
     function updateDragSelection(){
       dragSelectionLastUpdate = performance.now();
       if(!selectableCellCache || selectableCellCache.length === 0) rebuildSelectableCellCache();
-      const rect = layout.getBoundingClientRect();
+      const stageRect = zoomStage.getBoundingClientRect();
       const currentContent = clientToContent(dragCurrentX, dragCurrentY);
       const leftContent = Math.min(dragStartContentX, currentContent.x);
       const topContent = Math.min(dragStartContentY, currentContent.y);
       const widthContent = Math.abs(currentContent.x - dragStartContentX);
       const heightContent = Math.abs(currentContent.y - dragStartContentY);
-      const left = rect.left - layout.scrollLeft + leftContent * zoomScale;
-      const top = rect.top - layout.scrollTop + topContent * zoomScale;
+      const left = stageRect.left + leftContent * zoomScale;
+      const top = stageRect.top + topContent * zoomScale;
       const width = widthContent * zoomScale;
       const height = heightContent * zoomScale;
       selectionBox.style.display = "block";
@@ -868,10 +806,7 @@
           moved = true;
         }
       }
-      if(moved){
-        markSelectableCacheDirty();
-        updateDragSelection();
-      }
+      if(moved) updateDragSelection();
       autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
     }
 
@@ -890,22 +825,18 @@
       const cx = (pts[0].x + pts[1].x) / 2;
       const cy = (pts[0].y + pts[1].y) / 2;
       const dist = getTwoFingerDistance();
-      const hadPrevCenter = lastCenterX !== 0 || lastCenterY !== 0;
-      const hadPrevDistance = lastPinchDistance > 0;
-
-      if(hadPrevCenter){
-        layout.scrollLeft -= (cx - lastCenterX);
-        layout.scrollTop -= (cy - lastCenterY);
+      if(lastCenterX || lastCenterY){
+        layout.scrollLeft -= (cx - lastCenterX) * 1.2;
+        layout.scrollTop -= (cy - lastCenterY) * 1.2;
       }
-
-      if(hadPrevDistance && dist > 0){
+      if(lastPinchDistance > 0 && dist > 0){
         const ratio = dist / lastPinchDistance;
         const delta = Math.abs(dist - lastPinchDistance);
         if(delta > 3 && Math.abs(ratio - 1) > 0.004){
           const nextZoom = Math.max(0.2, Math.min(2, zoomScale * ratio));
           if(Math.abs(nextZoom - zoomScale) > 0.002){
             zoomScale = nextZoom;
-            applyZoom(true, cx, cy, true);
+            applyZoom(true, cx, cy);
           }
         }
       }
@@ -915,17 +846,11 @@
     }
 
     function updateSelectionVisuals(){
-      prevSelectedVisualIds.forEach((id) => {
-        if(selectedIds.has(id)) return;
-        const el = getCellElement(id);
-        if(el) el.classList.remove("selected");
-      });
-      selectedIds.forEach((id) => {
-        if(prevSelectedVisualIds.has(id)) return;
-        const el = getCellElement(id);
+      document.querySelectorAll(".cell.selected").forEach((el)=> el.classList.remove("selected"));
+      selectedIds.forEach((id)=>{
+        const el = document.querySelector(`.cell[data-cell-id="${id}"]`);
         if(el) el.classList.add("selected");
       });
-      prevSelectedVisualIds = new Set(selectedIds);
       const laneNames = [...new Set([...selectedIds].map((id) => id.split("-")[0]).filter((name) => name))];
       if(laneNames.length === 0) selectedLaneDisplay.textContent = "-";
       else if(laneNames.length === 1) selectedLaneDisplay.textContent = laneNames[0];
@@ -941,131 +866,6 @@
     function clearSelection(){
       selectedIds.clear();
       updateSelectionVisuals();
-    }
-
-    function handleCellPointerDown(e, id){
-      activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-      if(activePointers.size === 2){
-        const pts = [...activePointers.values()];
-        lastCenterX = (pts[0].x + pts[1].x) / 2;
-        lastCenterY = (pts[0].y + pts[1].y) / 2;
-        lastPinchDistance = getTwoFingerDistance();
-        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-        hideTooltip();
-        clearDragBox();
-        dragSelecting = false;
-        stopAutoScroll();
-        return;
-      }
-      if(moveMode){
-        panLastX = e.clientX;
-        panLastY = e.clientY;
-        return;
-      }
-      pressMoved = false;
-      pressLongFired = false;
-      dragSelecting = false;
-      dragCurrentX = e.clientX;
-      dragCurrentY = e.clientY;
-      const startContent = clientToContent(e.clientX, e.clientY);
-      dragStartContentX = startContent.x;
-      dragStartContentY = startContent.y;
-      pressStartX = e.clientX;
-      pressStartY = e.clientY;
-      hideTooltip();
-      clearDragBox();
-      if(pressTimer) clearTimeout(pressTimer);
-      pressTimer = window.setTimeout(()=>{
-        pressLongFired = true;
-        const storedData = cellData[id];
-        if(storedData && (storedData.date || storedData.size || storedData.containerType || storedData.extend)) {
-          const parts = [];
-          if(storedData.date) parts.push(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`);
-          if(storedData.size) parts.push(`サイズ: ${storedData.size}`);
-          if(storedData.containerType) parts.push(`コンテナ: ${storedData.containerType}`);
-          if(storedData.extend) parts.push(`延長: +1ヶ月`);
-          showTooltip(parts.join(" / "), e.clientX, e.clientY);
-        } else {
-          showTooltip("移植情報未入力", e.clientX, e.clientY);
-        }
-      }, 600);
-    }
-
-    function handleCellPointerMove(e){
-      if(moveMode && activePointers.has(e.pointerId) && activePointers.size < 2){
-        const dx = e.clientX - panLastX;
-        const dy = e.clientY - panLastY;
-        layout.scrollLeft -= dx;
-        layout.scrollTop -= dy;
-        panLastX = e.clientX;
-        panLastY = e.clientY;
-        activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-        return;
-      }
-      if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
-      updateActivePointersForEvent(e);
-      if(activePointers.size === 2){
-        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-        hideTooltip();
-        dragSelecting = false;
-        clearDragBox();
-        updateTwoFingerScroll();
-        return;
-      }
-      const dx = Math.abs(e.clientX - pressStartX);
-      const dy = Math.abs(e.clientY - pressStartY);
-      if(dx > 8 || dy > 8){
-        pressMoved = true;
-        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-      }
-      if(pressMoved && !pressLongFired && rectSelectMode){
-        if(!dragSelecting) rebuildSelectableCellCache();
-        dragSelecting = true;
-        dragCurrentX = e.clientX;
-        dragCurrentY = e.clientY;
-        const rect = layout.getBoundingClientRect();
-        const edge = isIPadSubMode ? 60 : 80;
-        autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
-        const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
-        const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
-        autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
-        updateDragSelectionThrottled();
-        if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
-      }
-    }
-
-    function handleCellPointerUp(e, id){
-      activePointers.delete(e.pointerId);
-      if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
-      if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-      autoScrollDirX = 0;
-      autoScrollDirY = 0;
-      if(dragSelecting){
-        stopAutoScroll();
-        clearDragBox();
-        updateSelectionVisuals();
-      } else if(!rectSelectMode && !pressLongFired && !pressMoved){
-        const now = Date.now();
-        if(now < suppressDoubleTapUntil){
-          lastTapTime = 0;
-          selectSingle(id);
-          return;
-        }
-        const dt = now - lastTapTime;
-        if(e.pointerType === "touch" && dt > 0 && dt < 280){
-          const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
-          zoomScale = nextZoom;
-          applyZoom(true, e.clientX, e.clientY, true);
-          lastTapTime = 0;
-          return;
-        }
-        lastTapTime = now;
-        selectSingle(id);
-      }
-    }
-
-    function handleCellPointerLeave(){
-      if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
     }
 
     function openDateModal(){
@@ -1208,9 +1008,6 @@
     function render(){
       updateCounter();
       zoomStage.innerHTML = "";
-      cellElements.clear();
-      prevSelectedVisualIds = new Set();
-      const frag = document.createDocumentFragment();
       for(const name of layoutOrder){
         const line = document.createElement("div");
         line.className = "line";
@@ -1259,28 +1056,152 @@
         for(let r=1; r<=totalRows; r++){
           for(let c=0; c<cols; c++){
             const cell = document.createElement("div");
-            const realRow = r - offset;
-            const isBlank = realRow < 1 || realRow > rows;
-            cell.className = "cell";
-            if(isBlank){
-              cell.classList.add("blank-cell");
-              grid.appendChild(cell);
-              continue;
-            }
-            if(!isLane(name)) cell.classList.add("path-cell");
+            if(r <= offset || r > offset + rows){
+              cell.className = "cell blank-cell";
+              cell.textContent = "";
+            } else {
+              const realRow = r - offset;
+              const id = makeId(name, c, realRow);
+              const stored = cellData[id];
+              const growthClass = getGrowthClass(stored);
+              cell.className = "cell" + (isLane(name) ? "" : " path-cell");
+              if(growthClass) cell.classList.add(growthClass);
+              if(stored && stored.extend) cell.classList.add("extend-cell");
+              if(stored && stored.date){
+                if(hasSameGroupNeighbor(c, realRow, -1, 0)) cell.classList.add("merge-left");
+                if(hasSameGroupNeighbor(c, realRow, 1, 0)) cell.classList.add("merge-right");
+                if(hasSameGroupNeighbor(c, realRow, 0, -1)) cell.classList.add("merge-up");
+                if(hasSameGroupNeighbor(c, realRow, 0, 1)) cell.classList.add("merge-down");
+              }
+              if(selectedIds.has(id)) cell.classList.add("selected");
+              cell.textContent = String(realRow);
+              cell.dataset.cellId = id;
 
-            const id = makeId(name, c, realRow);
-            const stored = cellData[id];
-            const growthClass = getGrowthClass(stored);
-            if(growthClass) cell.classList.add(growthClass);
-            if(selectedIds.has(id)) cell.classList.add("selected");
-            if(hasSameGroupNeighbor(c, realRow, -1, 0)) cell.classList.add("merge-left");
-            if(hasSameGroupNeighbor(c, realRow, 1, 0)) cell.classList.add("merge-right");
-            if(hasSameGroupNeighbor(c, realRow, 0, -1)) cell.classList.add("merge-up");
-            if(hasSameGroupNeighbor(c, realRow, 0, 1)) cell.classList.add("merge-down");
-            cell.dataset.cellId = id;
-            cell.textContent = String(realRow);
-            cellElements.set(id, cell);
+              cell.addEventListener("pointerdown", (e)=>{
+                if(moveMode){
+                  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                  panLastX = e.clientX;
+                  panLastY = e.clientY;
+                }
+                activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                if(activePointers.size === 2){
+                  const pts = [...activePointers.values()];
+                  lastCenterX = (pts[0].x + pts[1].x) / 2;
+                  lastCenterY = (pts[0].y + pts[1].y) / 2;
+                  lastPinchDistance = getTwoFingerDistance();
+                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                  hideTooltip();
+                  clearDragBox();
+                  dragSelecting = false;
+                  stopAutoScroll();
+                  return;
+                }
+                pressMoved = false;
+                pressLongFired = false;
+                dragSelecting = false;
+                dragCurrentX = e.clientX;
+                dragCurrentY = e.clientY;
+                const startContent = clientToContent(e.clientX, e.clientY);
+                dragStartContentX = startContent.x;
+                dragStartContentY = startContent.y;
+                pressStartX = e.clientX;
+                pressStartY = e.clientY;
+                hideTooltip();
+                clearDragBox();
+                if(pressTimer) clearTimeout(pressTimer);
+                pressTimer = window.setTimeout(()=>{
+                  pressLongFired = true;
+                  const storedData = cellData[id];
+                  if(storedData && (storedData.date || storedData.size || storedData.containerType || storedData.extend)) {
+                    const parts = [];
+                    if(storedData.date) parts.push(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`);
+                    if(storedData.size) parts.push(`サイズ: ${storedData.size}`);
+                    if(storedData.containerType) parts.push(`コンテナ: ${storedData.containerType}`);
+                    if(storedData.extend) parts.push(`延長: +1ヶ月`);
+                    showTooltip(parts.join(" / "), e.clientX, e.clientY);
+                  } else {
+                    showTooltip("移植情報未入力", e.clientX, e.clientY);
+                  }
+                }, 600);
+              });
+
+              cell.addEventListener("pointermove", (e)=>{
+                if(moveMode && activePointers.has(e.pointerId) && activePointers.size < 2){
+                  const dx = e.clientX - panLastX;
+                  const dy = e.clientY - panLastY;
+                  layout.scrollLeft -= dx;
+                  layout.scrollTop -= dy;
+                  panLastX = e.clientX;
+                  panLastY = e.clientY;
+                  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                  return;
+                }
+                if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
+                if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+                if(activePointers.size === 2){
+                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                  hideTooltip();
+                  dragSelecting = false;
+                  clearDragBox();
+                  updateTwoFingerScroll();
+                  return;
+                }
+                const dx = Math.abs(e.clientX - pressStartX);
+                const dy = Math.abs(e.clientY - pressStartY);
+                if(dx > 8 || dy > 8){
+                  pressMoved = true;
+                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                }
+                if(pressMoved && !pressLongFired && rectSelectMode){
+                  if(!dragSelecting) rebuildSelectableCellCache();
+                  dragSelecting = true;
+                  dragCurrentX = e.clientX;
+                  dragCurrentY = e.clientY;
+                  const rect = layout.getBoundingClientRect();
+                  const edge = 80;
+                  autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
+                  const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
+                  const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
+                  autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
+                  updateDragSelectionThrottled();
+                  if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
+                }
+              });
+
+              cell.addEventListener("pointerup", (e)=>{
+                activePointers.delete(e.pointerId);
+                if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
+                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+                autoScrollDirX = 0;
+                autoScrollDirY = 0;
+                if(dragSelecting){
+                  stopAutoScroll();
+                  clearDragBox();
+                  updateSelectionVisuals();
+                } else if(!rectSelectMode && !pressLongFired && !pressMoved){
+                  const now = Date.now();
+                  if(now < suppressDoubleTapUntil){
+                    lastTapTime = 0;
+                    selectSingle(id);
+                    return;
+                  }
+                  const dt = now - lastTapTime;
+                  if(e.pointerType === "touch" && dt > 0 && dt < 280){
+                    const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
+                    zoomScale = nextZoom;
+                    applyZoom(true, e.clientX, e.clientY);
+                    lastTapTime = 0;
+                    return;
+                  }
+                  lastTapTime = now;
+                  selectSingle(id);
+                }
+              });
+
+              cell.addEventListener("pointerleave", ()=>{
+                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+              });
+            }
             grid.appendChild(cell);
           }
         }
@@ -1294,44 +1215,10 @@
         bottomTitle.addEventListener("click", selectWholeLane);
         line.appendChild(bottomTitle);
 
-        frag.appendChild(line);
+        zoomStage.appendChild(line);
       }
-      zoomStage.appendChild(frag);
-      updateBaseStageMetrics();
-      markSelectableCacheDirty();
-      rebuildSelectableCellCache(true);
-      updateSelectionVisuals();
+      rebuildSelectableCellCache();
     }
-
-    zoomStage.addEventListener("pointerdown", (e)=>{
-      const id = getCellIdFromEventTarget(e.target);
-      if(!id) return;
-      handleCellPointerDown(e, id);
-    }, { passive: true });
-
-    zoomStage.addEventListener("pointermove", (e)=>{
-      const id = getCellIdFromEventTarget(e.target);
-      if(!id && !activePointers.has(e.pointerId)) return;
-      handleCellPointerMove(e);
-    }, { passive: true });
-
-    zoomStage.addEventListener("pointerup", (e)=>{
-      const id = getCellIdFromEventTarget(e.target);
-      if(!id && !activePointers.has(e.pointerId)) return;
-      handleCellPointerUp(e, id || "");
-    }, { passive: true });
-
-    zoomStage.addEventListener("pointerleave", (e)=>{
-      const id = getCellIdFromEventTarget(e.target);
-      if(!id) return;
-      handleCellPointerLeave();
-    }, { passive: true });
-
-    zoomStage.addEventListener("pointercancel", ()=>{
-      handleCellPointerLeave();
-      dragSelecting = false;
-      stopAutoScroll();
-    }, { passive: true });
 
     layout.addEventListener("pointerdown", (e)=>{
       if(moveMode){
@@ -1436,7 +1323,7 @@
         if(dt > 0 && dt < 280){
           const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
           zoomScale = nextZoom;
-          applyZoom(true, e.clientX, e.clientY, true);
+          applyZoom(true, e.clientX, e.clientY);
           lastTapTime = 0;
           return;
         }
@@ -1496,7 +1383,6 @@
       rebuildSelectableCellCache();
     });
 
-    if(isIPadSubMode) document.body.classList.add("ipad-sub");
     loadLocalState();
     prevZoomScale = zoomScale;
     updateMoveModeButton();
