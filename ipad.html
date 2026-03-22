@@ -634,7 +634,18 @@
       if(value.size) cloned.size = value.size;
       if(value.containerType) cloned.containerType = value.containerType;
       if(value.extend) cloned.extend = true;
+      if(value.extendAppliedAt) cloned.extendAppliedAt = value.extendAppliedAt;
       return Object.keys(cloned).length ? cloned : null;
+    }
+
+    function todayString(){
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function shouldShowExtendFrame(stored){
+      if(!stored || !stored.extend) return false;
+      if(!stored.extendAppliedAt) return true;
+      return daysSince(stored.extendAppliedAt) < 30;
     }
 
     function buildRangeClipboardFromSelection(){
@@ -775,11 +786,13 @@
 
     function updateCounter(){
       const totalReadyCount = getReadyCount();
+      const selectedReadyCount = selectedIds.size > 0 ? getReadyCount(selectedIds) : 0;
+      const baseCount = selectedIds.size > 0 ? selectedReadyCount : totalReadyCount;
       const rate = parseFloat(rateSelect.value || 0);
-      const result = Math.floor(totalReadyCount * 40 * rate);
+      const result = Math.floor(baseCount * 40 * rate);
       calcResult.textContent = `苗数: ${result}`;
       if(selectedIds.size > 0){
-        counter.textContent = `選択中の出荷可能: ${getReadyCount(selectedIds)}`;
+        counter.textContent = `選択中の出荷可能: ${selectedReadyCount}`;
       } else {
         counter.textContent = `出荷可能コンテナ: ${totalReadyCount}`;
       }
@@ -1487,6 +1500,7 @@
         else delete cellData[id].size;
         if(entryContainer.value) cellData[id].containerType = entryContainer.value;
         else delete cellData[id].containerType;
+        if(!cellData[id].extend) delete cellData[id].extendAppliedAt;
         if(!cellData[id].date && !cellData[id].extend && !cellData[id].size && !cellData[id].containerType){
           delete cellData[id];
         }
@@ -1503,6 +1517,8 @@
       selectedIds.forEach((id) => {
         if(!cellData[id]) cellData[id] = {};
         cellData[id].extend = !cellData[id].extend;
+        if(cellData[id].extend) cellData[id].extendAppliedAt = todayString();
+        else delete cellData[id].extendAppliedAt;
         if(!cellData[id].date && !cellData[id].extend && !cellData[id].size && !cellData[id].containerType) delete cellData[id];
       });
       render();
@@ -1612,7 +1628,7 @@
             const stored = cellData[id];
             const growthClass = getGrowthClass(stored);
             if(growthClass) cell.classList.add(growthClass);
-            if(stored && stored.extend) cell.classList.add("extend-cell");
+            if(shouldShowExtendFrame(stored)) cell.classList.add("extend-cell");
             if(selectedIds.has(id)) cell.classList.add("selected");
             if(hasSameGroupNeighbor(c, realRow, -1, 0)) cell.classList.add("merge-left");
             if(hasSameGroupNeighbor(c, realRow, 1, 0)) cell.classList.add("merge-right");
@@ -1877,6 +1893,20 @@
       console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "松" }) === false, "matsu should not count");
       const parsed = parseCellId("P10-11-1-23");
       console.assert(parsed && parsed.lane === "P10-11" && parsed.col === 1 && parsed.row === 23, "parseCellId should parse path ids");
+      console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: todayString() }) === true, "fresh extend frame should show");
+      console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10) }) === false, "old extend frame should hide");
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      selectedIds.clear();
+      cellData["L1-0-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
+      cellData["L1-1-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
+      rateSelect.value = "0.5";
+      updateCounter();
+      console.assert(counter.textContent.includes("出荷可能コンテナ: 2"), "global counter should show total ready count");
+      console.assert(calcResult.textContent === "苗数: 40", "global seedlings should use total ready count");
+      selectedIds.add("L1-0-1");
+      updateCounter();
+      console.assert(counter.textContent.includes("選択中の出荷可能: 1"), "selected counter should show selected ready count");
+      console.assert(calcResult.textContent === "苗数: 20", "selected seedlings should use selected ready count");
       const before = selectedIds.size;
       selectSingle("");
       console.assert(selectedIds.size === before, "empty id should not become selected");
