@@ -13,9 +13,6 @@
       font-family: sans-serif;
       background: #eef2f5;
       overflow: hidden;
-      position: relative;
-      min-height: 100vh;
-      overscroll-behavior: none;
     }
     h1 { margin: 0; font-size: 18px; }
     .topbar {
@@ -43,11 +40,10 @@
       position: fixed;
       left: 0;
       right: 0;
-      bottom: 0;
+      bottom: 10px;
       z-index: 6000;
       margin: 0;
       padding: 0 10px calc(10px + env(safe-area-inset-bottom));
-      box-sizing: border-box;
       display: flex;
       gap: 0;
       flex-wrap: nowrap;
@@ -61,12 +57,6 @@
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
       background: linear-gradient(to top, rgba(238,242,245,0.99), rgba(238,242,245,0.97), rgba(238,242,245,0.88));
-    }
-    body.viewport-fixed-ui #tooltip,
-    body.viewport-fixed-ui #toast,
-    body.viewport-fixed-ui #copyToast,
-    body.viewport-fixed-ui #moreMenuPanel {
-      position: absolute;
     }
     body.ipad-sub .title,
     body.ipad-sub #moreMenuPanel,
@@ -147,9 +137,7 @@
       height: 70vh;
       padding-right: 0;
       padding-bottom: 110px;
-      touch-action: pan-x pan-y;
-      overscroll-behavior: contain;
-      -webkit-overflow-scrolling: touch;
+      touch-action: none;
       user-select: none;
       -webkit-user-select: none;
       white-space: nowrap;
@@ -212,7 +200,7 @@
       user-select: none;
       -webkit-user-select: none;
       -webkit-touch-callout: none;
-      touch-action: manipulation;
+      touch-action: none;
       cursor: pointer;
       overflow: hidden;
       position: relative;
@@ -747,8 +735,7 @@
       }
     }
 
-    function closeMoreMenu(){ if(moreMenuPanel) moreMenuPanel.classList.remove("open");
-      syncViewportFixedUi(); }
+    function closeMoreMenu(){ if(moreMenuPanel) moreMenuPanel.classList.remove("open"); }
     function closeEntryModal(){ if(entryModal) entryModal.style.display = "none"; }
     function closeCellActionMenu(){
       longPressMenuCellId = "";
@@ -833,7 +820,9 @@
         const loadedCells = parsed.cellData && typeof parsed.cellData === "object" ? parsed.cellData : parsed;
         Object.keys(cellData).forEach((k) => delete cellData[k]);
         Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
-        zoomScale = 1;
+        if(typeof parsed.zoomScale === "number" && Number.isFinite(parsed.zoomScale)) {
+          zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
+        }
         if(parsed.rate) rateSelect.value = parsed.rate;
       } catch(e){
         console.warn("load local failed", e);
@@ -875,7 +864,7 @@
       Object.keys(cellData).forEach((k) => delete cellData[k]);
       Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
 
-      zoomScale = 1;
+      if(typeof parsed.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
       if(parsed.rate) rateSelect.value = String(parsed.rate);
 
       selectedIds.clear();
@@ -1050,16 +1039,6 @@
       rectModeBtn.style.background = rectSelectMode ? "#00b894" : "#2d3436";
     }
 
-    function updateTouchInteractionMode(){
-      if(rectSelectMode){
-        layout.style.touchAction = "none";
-        zoomStage.style.touchAction = "none";
-      } else {
-        layout.style.touchAction = "pan-x pan-y";
-        zoomStage.style.touchAction = "manipulation";
-      }
-    }
-
     function markSelectableCacheDirty(){
       selectableCacheDirty = true;
     }
@@ -1092,69 +1071,18 @@
       }, delay);
     }
 
-    function getViewportMetrics(){
-      const vv = window.visualViewport;
-      if(vv){
-        return {
-          width: vv.width,
-          height: vv.height,
-          offsetLeft: vv.offsetLeft,
-          offsetTop: vv.offsetTop,
-          pageLeft: vv.pageLeft || 0,
-          pageTop: vv.pageTop || 0,
-          scale: vv.scale || 1,
-        };
-      }
-      return {
-        width: window.innerWidth,
-        height: window.innerHeight,
-        offsetLeft: 0,
-        offsetTop: 0,
-        pageLeft: window.scrollX || 0,
-        pageTop: window.scrollY || 0,
-        scale: 1,
-      };
-    }
-
-    function syncViewportFixedUi(){
-      const metrics = getViewportMetrics();
-      const vvActive = !!window.visualViewport && metrics.scale !== 1;
-      document.body.classList.toggle("viewport-fixed-ui", vvActive);
-
-      toolbar.style.left = '';
-      toolbar.style.right = '';
-      toolbar.style.width = '';
-      toolbar.style.bottom = '';
-
-      if(moreMenuPanel.classList.contains('open')){
-        const menuRect = moreMenuBtn.getBoundingClientRect();
-        const panelWidth = Math.min(220, Math.max(160, metrics.width - 48));
-        const left = Math.max(metrics.offsetLeft + 12, Math.min(menuRect.left + metrics.offsetLeft, metrics.offsetLeft + metrics.width - panelWidth - 12));
-        const top = menuRect.top + metrics.offsetTop - moreMenuPanel.offsetHeight - 8;
-        moreMenuPanel.style.left = `${left}px`;
-        moreMenuPanel.style.top = `${Math.max(metrics.offsetTop + 12, top)}px`;
-        moreMenuPanel.style.width = `${panelWidth}px`;
-      } else {
-        moreMenuPanel.style.left = '';
-        moreMenuPanel.style.top = '';
-        moreMenuPanel.style.width = '';
-      }
-    }
-
     function updateLayoutViewport(){
-      const metrics = getViewportMetrics();
-      const top = layout.getBoundingClientRect().top - metrics.offsetTop;
+      const top = layout.getBoundingClientRect().top;
       const safeBottom = 16;
-      const h = Math.max(240, metrics.height - top - safeBottom);
+      const h = Math.max(240, window.innerHeight - top - safeBottom);
       layout.style.height = `${h}px`;
-      const scaledW = Math.ceil(baseStageWidth);
-      const scaledH = Math.ceil(baseStageHeight);
-      const extraBottom = Math.max(Math.round(metrics.height * 1.1), 420);
+      const scaledW = Math.ceil(baseStageWidth * zoomScale);
+      const scaledH = Math.ceil(baseStageHeight * zoomScale);
+      const extraBottom = Math.max(Math.round(window.innerHeight * 1.1), Math.round(420 * zoomScale));
       layout.style.paddingBottom = `${extraBottom}px`;
       layout.style.paddingRight = `0px`;
       layoutSpacer.style.width = `${Math.max(1, scaledW)}px`;
       layoutSpacer.style.height = `${scaledH + 800}px`;
-      syncViewportFixedUi();
     }
 
     function rebuildSelectableCellCache(force = false){
@@ -1172,13 +1100,27 @@
       selectableCacheDirty = false;
     }
 
-    function applyZoom(){
-      zoomScale = 1;
+    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null, deferCache = false){
+      if(!Number.isFinite(zoomScale) || zoomScale <= 0) zoomScale = 1;
+      const rect = layout.getBoundingClientRect();
+      const viewportAnchorX = anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2;
+      const viewportAnchorY = anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2;
+      const safePrevScale = prevZoomScale > 0 ? prevZoomScale : 1;
+      const anchorContentX = (layout.scrollLeft + viewportAnchorX) / safePrevScale;
+      const anchorContentY = (layout.scrollTop + viewportAnchorY) / safePrevScale;
+
       zoomStage.style.transformOrigin = "0 0";
-      zoomStage.style.transform = "none";
+      zoomStage.style.transform = `scale(${zoomScale})`;
       updateLayoutViewport();
-      prevZoomScale = 1;
-      rebuildSelectableCellCache(true);
+
+      if(centered){
+        layout.scrollLeft = anchorContentX * zoomScale - viewportAnchorX;
+        layout.scrollTop = anchorContentY * zoomScale - viewportAnchorY;
+      }
+
+      prevZoomScale = zoomScale;
+      if(deferCache) scheduleCacheRebuild(isIPadSubMode ? 180 : 120);
+      else rebuildSelectableCellCache(true);
     }
 
     function clientToContent(clientX, clientY){
@@ -1268,21 +1210,35 @@
     }
 
     function updateTwoFingerScroll(){
+      suppressDoubleTapUntil = Date.now() + 350;
       recentTouchScrollUntil = Date.now() + 500;
       if(activePointers.size !== 2) return;
       const pts = [...activePointers.values()];
       const cx = (pts[0].x + pts[1].x) / 2;
       const cy = (pts[0].y + pts[1].y) / 2;
+      const dist = getTwoFingerDistance();
       const hadPrevCenter = lastCenterX !== 0 || lastCenterY !== 0;
+      const hadPrevDistance = lastPinchDistance > 0;
 
       if(hadPrevCenter){
         layout.scrollLeft -= (cx - lastCenterX);
         layout.scrollTop -= (cy - lastCenterY);
       }
 
+      if(hadPrevDistance && dist > 0){
+        const ratio = dist / lastPinchDistance;
+        const delta = Math.abs(dist - lastPinchDistance);
+        if(delta > 3 && Math.abs(ratio - 1) > 0.004){
+          const nextZoom = Math.max(0.2, Math.min(2, zoomScale * ratio));
+          if(Math.abs(nextZoom - zoomScale) > 0.002){
+            zoomScale = nextZoom;
+            applyZoom(true, cx, cy, true);
+          }
+        }
+      }
       lastCenterX = cx;
       lastCenterY = cy;
-      lastPinchDistance = 0;
+      lastPinchDistance = dist;
     }
 
     function updateSelectionVisuals(){
@@ -1440,6 +1396,30 @@
         clearDragBox();
         updateSelectionVisuals();
       } else if(!rectSelectMode && !pressLongFired && !pressMoved){
+        const now = Date.now();
+        if(now < suppressDoubleTapUntil){
+          lastTapTime = 0;
+          selectSingle(id);
+          return;
+        }
+        const dt = now - lastTapTime;
+        const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
+        const canDoubleTapZoom = e.pointerType === "touch"
+          && now >= recentTouchScrollUntil
+          && dt > 0
+          && dt < 280
+          && tapMove <= 18;
+        if(canDoubleTapZoom){
+          zoomScale = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
+          applyZoom(true, e.clientX, e.clientY, true);
+          lastTapTime = 0;
+          lastTouchUpX = 0;
+          lastTouchUpY = 0;
+          return;
+        }
+        lastTapTime = now;
+        lastTouchUpX = e.clientX;
+        lastTouchUpY = e.clientY;
         selectSingle(id);
       }
     }
@@ -1491,7 +1471,7 @@
         try {
           Object.keys(cellData).forEach((k) => delete cellData[k]);
           Object.entries(data.cellData || {}).forEach(([k, v]) => { cellData[k] = v; });
-          zoomScale = 1;
+          if(typeof data.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, data.zoomScale));
           if(data.rate) rateSelect.value = String(data.rate);
           render();
           applyZoom(false);
@@ -1805,9 +1785,28 @@
         clearDragBox();
         updateSelectionVisuals();
       }
-      // ダブルタップ拡大は無効化
-      // 空白部分のタッチ終了では何もしない
-      
+      if(!moveMode && e.pointerType === "touch"){
+        const now = Date.now();
+        if(now < suppressDoubleTapUntil || now < recentTouchScrollUntil){
+          lastTapTime = 0;
+          lastTouchUpX = e.clientX;
+          lastTouchUpY = e.clientY;
+          return;
+        }
+        const dt = now - lastTapTime;
+        const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
+        if(dt > 0 && dt < 280 && tapMove <= 18){
+          zoomScale = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
+          applyZoom(true, e.clientX, e.clientY, true);
+          lastTapTime = 0;
+          lastTouchUpX = 0;
+          lastTouchUpY = 0;
+          return;
+        }
+        lastTapTime = now;
+        lastTouchUpX = e.clientX;
+        lastTouchUpY = e.clientY;
+      }
     });
 
     entryCancelBtn.addEventListener("click", closeEntryModal);
@@ -1837,7 +1836,6 @@
     moreMenuBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       moreMenuPanel.classList.toggle("open");
-      syncViewportFixedUi();
     });
     rateSelect.addEventListener("change", () => { updateCounter(); scheduleCloudSave(); });
     moveModeBtn.addEventListener("click", () => {
@@ -1861,7 +1859,6 @@
       clearDragBox();
       hideTooltip();
       updateRectModeButton();
-      updateTouchInteractionMode();
     });
     document.addEventListener("pointerdown", (e) => {
       if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
@@ -1887,17 +1884,7 @@
     window.addEventListener("resize", () => {
       applyZoom(false);
       rebuildSelectableCellCache();
-      syncViewportFixedUi();
     });
-
-    if(window.visualViewport){
-      const handleVisualViewportChange = () => {
-        updateLayoutViewport();
-        rebuildSelectableCellCache();
-      };
-      window.visualViewport.addEventListener("resize", handleVisualViewportChange);
-      window.visualViewport.addEventListener("scroll", handleVisualViewportChange);
-    }
 
     function runDevChecks(){
       console.assert(typeof updateSelectedCounter === "function", "updateSelectedCounter should exist");
@@ -1945,13 +1932,11 @@
     if(isIPadSubMode) document.body.classList.add("ipad-sub");
     loadLocalState();
     loadCellClipboard();
-    prevZoomScale = 1;
+    prevZoomScale = zoomScale;
     updateMoveModeButton();
     updateRectModeButton();
-    updateTouchInteractionMode();
     render();
     applyZoom(false);
-    syncViewportFixedUi();
     updateSelectionVisuals();
     runDevChecks();
     subscribeCloud();
