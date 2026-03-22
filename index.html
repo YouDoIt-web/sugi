@@ -2,17 +2,25 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta id="viewportMeta" name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light only" />
-  <title>杉苗管理 v13</title>
+  <title>杉苗管理 v14</title>
   <style>
     :root { color-scheme: light only; }
+    html, body {
+      height: 100%;
+      overscroll-behavior: none;
+    }
     body {
       margin: 0;
       padding: 12px;
       font-family: sans-serif;
       background: #eef2f5;
       overflow: hidden;
+      position: fixed;
+      inset: 0;
+      box-sizing: border-box;
+      width: 100%;
     }
     h1 { margin: 0; font-size: 18px; }
     .topbar {
@@ -52,6 +60,16 @@
       background: linear-gradient(to top, rgba(238,242,245,0.98), rgba(238,242,245,0.9), rgba(238,242,245,0));
       backdrop-filter: blur(4px);
       -webkit-backdrop-filter: blur(4px);
+    }
+    body.ipad-sub .toolbar {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      background: linear-gradient(to top, rgba(238,242,245,0.99), rgba(238,242,245,0.97), rgba(238,242,245,0.88));
+    }
+    body.ipad-sub .title,
+    body.ipad-sub #moreMenuPanel,
+    body.ipad-sub #toast {
+      box-shadow: none;
       box-sizing: border-box;
       overflow-x: auto;
     }
@@ -210,9 +228,13 @@
       cursor: default;
       border-color: transparent;
     }
-    .dated-cell, .month1-cell {
+    .dated-cell {
       background: #ff7675;
       color: rgba(0,0,0,0.65);
+    }
+    .month1-cell {
+      background: #f7a36a;
+      color: rgba(0,0,0,0.72);
     }
     .month2-cell {
       background: #fab1a0;
@@ -221,6 +243,14 @@
     .month3-cell {
       background: rgb(255, 245, 130) !important;
       color: #111 !important;
+    }
+    .hinoki-cell {
+      background: #b8875a !important;
+      color: rgba(0,0,0,0.72) !important;
+    }
+    .matsu-cell {
+      background: #a29bfe !important;
+      color: rgba(0,0,0,0.78) !important;
     }
     .ready-cell {
       background: #55efc4;
@@ -248,6 +278,39 @@
       max-width: min(320px, calc(100vw - 20px));
       box-shadow: 0 4px 12px rgba(0,0,0,0.25);
     }
+    #cellActionMenu {
+      position: fixed;
+      display: none;
+      z-index: 12000;
+      background: rgba(255,255,255,0.98);
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      padding: 8px;
+      width: min(220px, calc(100vw - 24px));
+      box-sizing: border-box;
+    }
+    #cellActionMenu.open { display: block; }
+    #cellActionInfo {
+      background: #f5f7f8;
+      color: #2d3436;
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: normal;
+      word-break: break-word;
+    }
+    #cellActionMenu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 0 0 6px;
+      background: #2d3436;
+      border-radius: 8px;
+      box-shadow: none;
+    }
+    #cellActionMenu button:last-child { margin-bottom: 0; }
     #selectionBox {
       position: fixed;
       display: none;
@@ -375,6 +438,11 @@
 
   <div id="layout"><div id="zoomStage"></div><div id="layoutSpacer"></div></div>
   <div id="tooltip"></div>
+  <div id="cellActionMenu">
+    <div id="cellActionInfo">移植情報未入力</div>
+    <button id="longPressCopyBtn" type="button">コピー</button>
+    <button id="longPressPasteBtn" type="button">貼り付け</button>
+  </div>
   <div id="selectionBox"></div>
   <div id="toast"></div>
 
@@ -394,6 +462,8 @@
           <option value="中">中</option>
           <option value="戻">戻</option>
           <option value="挿">挿</option>
+          <option value="ヒノキ">ヒノキ</option>
+          <option value="松">松</option>
         </select>
       </div>
       <div class="entry-row">
@@ -428,7 +498,9 @@
     const db = getFirestore(app);
     const cloudRef = doc(db, "sugi", "state");
 
-    const STORAGE_KEY = "sugi_lane_manager_state_v13";
+    const STORAGE_KEY = "sugi_lane_manager_state_v14";
+    const CELL_CLIPBOARD_KEY = "sugi_lane_manager_cell_clipboard_v14";
+    const RANGE_CLIPBOARD_VERSION = 2;
     const MONTH1_DAYS = 30;
     const MONTH2_DAYS = 60;
     const MONTH3_DAYS = 90;
@@ -442,8 +514,19 @@
     const cellData = {};
     const historyStack = [];
     const redoStack = [];
+    const cellElements = new Map();
     let selectableCellCache = [];
+    let selectableCacheDirty = true;
+    let prevSelectedVisualIds = new Set();
+    let cellClipboard = null;
+    const isIPadSubMode = (() => {
+      const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      const longSide = Math.max(window.innerWidth || 0, window.innerHeight || 0);
+      return coarse && longSide >= 900;
+    })();
+    const disableDoubleTapZoom = isIPadSubMode;
 
+    const viewportMeta = document.getElementById("viewportMeta");
     const counter = document.getElementById("counter");
     const rateSelect = document.getElementById("rateSelect");
     const calcResult = document.getElementById("calcResult");
@@ -452,6 +535,7 @@
     const zoomStage = document.getElementById("zoomStage");
     const layoutSpacer = document.getElementById("layoutSpacer");
     const tooltip = document.getElementById("tooltip");
+    const cellActionMenu = document.getElementById("cellActionMenu");
     const selectionBox = document.getElementById("selectionBox");
     const toast = document.getElementById("toast");
     const setDateBtn = document.getElementById("setDateBtn");
@@ -473,6 +557,9 @@
     const entryContainer = document.getElementById("entryContainer");
     const entryCancelBtn = document.getElementById("entryCancelBtn");
     const entrySaveBtn = document.getElementById("entrySaveBtn");
+    const longPressCopyBtn = document.getElementById("longPressCopyBtn");
+    const longPressPasteBtn = document.getElementById("longPressPasteBtn");
+    const cellActionInfo = document.getElementById("cellActionInfo");
 
     let rectSelectMode = false;
     let moveMode = false;
@@ -505,6 +592,16 @@
     let dragSelectionLastUpdate = 0;
     let lastTapTime = 0;
     let suppressDoubleTapUntil = 0;
+    let baseStageWidth = 1;
+    let baseStageHeight = 1;
+    let cacheRebuildTimer = 0;
+    let longPressMenuCellId = "";
+    let recentTouchScrollUntil = 0;
+    let lastTouchUpX = 0;
+    let lastTouchUpY = 0;
+    let lastSafariTouchEndTime = 0;
+    let lastSafariTouchEndX = 0;
+    let lastSafariTouchEndY = 0;
 
     function isLane(name){ return name.startsWith("L"); }
     function getRows(name){ return isLane(name) ? (laneLengths[Number(name.slice(1))] || 67) : (pathLengths[name] || 67); }
@@ -512,8 +609,151 @@
     function makeId(name,colIndex,row){ return `${name}-${colIndex}-${row}`; }
     function daysSince(dateStr){ return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000); }
 
+    function parseCellId(id){
+      const parts = String(id || "").split("-");
+      if(parts.length < 3) return null;
+      const row = Number(parts.pop());
+      const col = Number(parts.pop());
+      const lane = parts.join("-");
+      if(!lane || !Number.isFinite(col) || !Number.isFinite(row)) return null;
+      return { lane, col, row };
+    }
+
+    function compareCellIds(a, b){
+      const pa = parseCellId(a);
+      const pb = parseCellId(b);
+      const laneA = pa ? layoutOrder.indexOf(pa.lane) : Number.MAX_SAFE_INTEGER;
+      const laneB = pb ? layoutOrder.indexOf(pb.lane) : Number.MAX_SAFE_INTEGER;
+      if(laneA !== laneB) return laneA - laneB;
+      if((pa?.row || 0) !== (pb?.row || 0)) return (pa?.row || 0) - (pb?.row || 0);
+      return (pa?.col || 0) - (pb?.col || 0);
+    }
+
+    function getSortedSelectedIds(){
+      return [...selectedIds].sort(compareCellIds);
+    }
+
+    function getSelectionAnchor(idsIterable = selectedIds){
+      const ids = [...idsIterable].filter(Boolean);
+      if(ids.length === 0) return null;
+      ids.sort(compareCellIds);
+      return parseCellId(ids[0]);
+    }
+
+    function cloneCellValue(value){
+      if(!value || typeof value !== "object") return null;
+      const cloned = {};
+      if(value.date) cloned.date = value.date;
+      if(value.size) cloned.size = value.size;
+      if(value.containerType) cloned.containerType = value.containerType;
+      if(value.extend) cloned.extend = true;
+      if(value.extendAppliedAt) cloned.extendAppliedAt = value.extendAppliedAt;
+      return Object.keys(cloned).length ? cloned : null;
+    }
+
+    function todayString(){
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function shouldShowExtendFrame(stored){
+      if(!stored || !stored.extend) return false;
+      if(!stored.extendAppliedAt) return true;
+      return daysSince(stored.extendAppliedAt) < 30;
+    }
+
+    function buildRangeClipboardFromSelection(){
+      const ids = getSortedSelectedIds();
+      if(ids.length === 0) return null;
+      const anchor = getSelectionAnchor(ids);
+      if(!anchor) return null;
+      const anchorLaneIndex = layoutOrder.indexOf(anchor.lane);
+      const items = [];
+      ids.forEach((id) => {
+        const pos = parseCellId(id);
+        if(!pos) return;
+        const value = cloneCellValue(cellData[id]);
+        if(!value) return;
+        items.push({
+          sourceId: id,
+          laneOffset: layoutOrder.indexOf(pos.lane) - anchorLaneIndex,
+          colOffset: pos.col - anchor.col,
+          rowOffset: pos.row - anchor.row,
+          data: value,
+        });
+      });
+      if(items.length === 0) return null;
+      return {
+        version: RANGE_CLIPBOARD_VERSION,
+        copiedAt: Date.now(),
+        anchor: { lane: anchor.lane, col: anchor.col, row: anchor.row },
+        items,
+      };
+    }
+
+    function resolveClipboardTargetIds(clipboard, targetAnchor){
+      if(!clipboard || !Array.isArray(clipboard.items) || !targetAnchor) return [];
+      const targetLaneIndex = layoutOrder.indexOf(targetAnchor.lane);
+      if(targetLaneIndex < 0) return [];
+      const resolved = [];
+      clipboard.items.forEach((item) => {
+        const laneIndex = targetLaneIndex + Number(item.laneOffset || 0);
+        if(laneIndex < 0 || laneIndex >= layoutOrder.length) return;
+        const lane = layoutOrder[laneIndex];
+        const col = targetAnchor.col + Number(item.colOffset || 0);
+        const row = targetAnchor.row + Number(item.rowOffset || 0);
+        const cols = getCols(lane);
+        const rows = getRows(lane);
+        if(col < 0 || col >= cols || row < 1 || row > rows) return;
+        resolved.push({ id: makeId(lane, col, row), data: cloneCellValue(item.data) });
+      });
+      return resolved;
+    }
+
+    function saveCellClipboard(){
+      try {
+        if(cellClipboard) localStorage.setItem(CELL_CLIPBOARD_KEY, JSON.stringify(cellClipboard));
+        else localStorage.removeItem(CELL_CLIPBOARD_KEY);
+      } catch (e) {
+        console.warn("save clipboard failed", e);
+      }
+    }
+
+    function loadCellClipboard(){
+      try {
+        const raw = localStorage.getItem(CELL_CLIPBOARD_KEY);
+        if(!raw) return;
+        const parsed = JSON.parse(raw);
+        if(!parsed || typeof parsed !== "object") return;
+        if(Array.isArray(parsed.items) && parsed.items.length > 0) {
+          cellClipboard = parsed;
+          return;
+        }
+        if(parsed.data && typeof parsed.data === "object") {
+          const pos = parseCellId(parsed.sourceId || "");
+          cellClipboard = {
+            version: 1,
+            copiedAt: parsed.copiedAt || Date.now(),
+            anchor: pos ? { lane: pos.lane, col: pos.col, row: pos.row } : null,
+            items: [{
+              sourceId: parsed.sourceId || "",
+              laneOffset: 0,
+              colOffset: 0,
+              rowOffset: 0,
+              data: cloneCellValue(parsed.data),
+            }].filter((item) => item.data),
+          };
+        }
+      } catch (e) {
+        console.warn("load clipboard failed", e);
+      }
+    }
+
     function closeMoreMenu(){ if(moreMenuPanel) moreMenuPanel.classList.remove("open"); }
     function closeEntryModal(){ if(entryModal) entryModal.style.display = "none"; }
+    function closeCellActionMenu(){
+      longPressMenuCellId = "";
+      if(cellActionMenu) cellActionMenu.classList.remove("open");
+    }
 
     function showToast(msg){
       toast.textContent = msg;
@@ -523,7 +763,10 @@
     }
 
     function getGrowthClass(stored){
-      if(!stored || !stored.date) return "";
+      if(!stored) return "";
+      if(stored.size === "ヒノキ") return "hinoki-cell";
+      if(stored.size === "松") return "matsu-cell";
+      if(!stored.date) return "";
       const d = daysSince(stored.date) - (stored.extend ? 30 : 0);
       if(d >= READY_DAYS) return "ready-cell";
       if(d >= MONTH3_DAYS) return "month3-cell";
@@ -532,23 +775,53 @@
       return "dated-cell";
     }
 
-    function updateCounter(){
-      let count = 0;
-      Object.values(cellData).forEach((value)=>{
-        if(value && value.date){
-          const d = daysSince(value.date) - (value.extend ? 30 : 0);
-          if(d >= READY_DAYS) count += 1;
+    function isReadyCountTarget(value){
+      if(!value || !value.date) return false;
+      if(value.size === "ヒノキ" || value.size === "松") return false;
+      const d = daysSince(value.date) - (value.extend ? 30 : 0);
+      return d >= READY_DAYS;
+    }
+
+    function getReadyCount(idsIterable = null){
+      if(idsIterable){
+        let count = 0;
+        for(const id of idsIterable){
+          if(isReadyCountTarget(cellData[id])) count += 1;
         }
+        return count;
+      }
+      let count = 0;
+      Object.values(cellData).forEach((value) => {
+        if(isReadyCountTarget(value)) count += 1;
       });
-      counter.textContent = `出荷可能コンテナ: ${count}`;
+      return count;
+    }
+
+    function updateCounter(){
+      const totalReadyCount = getReadyCount();
+      const selectedReadyCount = selectedIds.size > 0 ? getReadyCount(selectedIds) : 0;
+      const useSelectedSummary = selectedIds.size > 1;
+      const baseCount = useSelectedSummary ? selectedReadyCount : totalReadyCount;
       const rate = parseFloat(rateSelect.value || 0);
-      const result = Math.floor(count * 40 * rate);
+      const result = Math.floor(baseCount * 40 * rate);
       calcResult.textContent = `苗数: ${result}`;
+      if(useSelectedSummary){
+        counter.textContent = `選択中の出荷可能: ${selectedReadyCount}`;
+      } else {
+        counter.textContent = `出荷可能コンテナ: ${totalReadyCount}`;
+      }
+    }
+
+    function updateSelectedCounter(){
+      updateCounter();
     }
 
     function saveLocalState(){
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({cellData, zoomScale, rate: rateSelect.value})); }
-      catch(e){ console.warn("save local failed", e); }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({cellData, zoomScale, rate: rateSelect.value}));
+      } catch(e){
+        console.warn("save local failed", e);
+      }
     }
 
     function loadLocalState(){
@@ -558,11 +831,15 @@
         const parsed = JSON.parse(raw);
         if(!parsed || typeof parsed !== "object") return;
         const loadedCells = parsed.cellData && typeof parsed.cellData === "object" ? parsed.cellData : parsed;
-        Object.keys(cellData).forEach(k => delete cellData[k]);
-        Object.entries(loadedCells).forEach(([k,v]) => { cellData[k] = v; });
-        if(typeof parsed.zoomScale === "number" && Number.isFinite(parsed.zoomScale)) zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
+        Object.keys(cellData).forEach((k) => delete cellData[k]);
+        Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
+        if(typeof parsed.zoomScale === "number" && Number.isFinite(parsed.zoomScale)) {
+          zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
+        }
         if(parsed.rate) rateSelect.value = parsed.rate;
-      } catch(e){ console.warn("load local failed", e); }
+      } catch(e){
+        console.warn("load local failed", e);
+      }
     }
 
     function snapshotState(){
@@ -581,11 +858,11 @@
     }
 
     async function copyJson(){
-      try{
+      try {
         const json = JSON.stringify(buildBackupPayload(), null, 2);
         await navigator.clipboard.writeText(json);
         showToast("JSONをコピーしました");
-      }catch(e){
+      } catch(e) {
         console.error(e);
         alert("コピー保存に失敗しました");
       }
@@ -597,8 +874,8 @@
         : (parsed && typeof parsed === "object" ? parsed : null);
       if(!loadedCells || typeof loadedCells !== "object") throw new Error("invalid json");
 
-      Object.keys(cellData).forEach(k=>delete cellData[k]);
-      Object.entries(loadedCells).forEach(([k,v])=>{ cellData[k]=v; });
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
 
       if(typeof parsed.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
       if(parsed.rate) rateSelect.value = String(parsed.rate);
@@ -615,14 +892,64 @@
     function importFromPaste(){
       const text = prompt("JSONを貼り付けてください");
       if(!text) return;
-      try{
+      try {
         const parsed = JSON.parse(text);
         applyImportedPayload(parsed);
         showToast("貼り付け読込しました");
-      }catch(e){
+      } catch(e) {
         console.error(e);
         alert("JSONが不正です");
       }
+    }
+
+    function copySelectedCellData(){
+      if(selectedIds.size === 0){
+        alert("コピー元のセルを選択してください");
+        return false;
+      }
+      const nextClipboard = buildRangeClipboardFromSelection();
+      if(!nextClipboard){
+        alert("コピー元選択内に情報がありません");
+        return false;
+      }
+      cellClipboard = nextClipboard;
+      saveCellClipboard();
+      showToast(`${cellClipboard.items.length}セル分を範囲コピーしました`);
+      return true;
+    }
+
+    function pasteToSelectedCells(){
+      if(!cellClipboard || !Array.isArray(cellClipboard.items) || cellClipboard.items.length === 0){
+        alert("先にセルコピーしてください");
+        return false;
+      }
+      if(selectedIds.size === 0){
+        alert("貼り付け先の基準セルを選択してください");
+        return false;
+      }
+      const targetAnchor = getSelectionAnchor(selectedIds);
+      if(!targetAnchor){
+        alert("貼り付け先の基準セルを選択してください");
+        return false;
+      }
+      const targets = resolveClipboardTargetIds(cellClipboard, targetAnchor);
+      if(targets.length === 0){
+        alert("貼り付けできる範囲がありません");
+        return false;
+      }
+      snapshotState();
+      const pastedIds = [];
+      targets.forEach(({ id, data }) => {
+        if(!data) return;
+        cellData[id] = data;
+        pastedIds.push(id);
+      });
+      selectedIds.clear();
+      pastedIds.forEach((id) => selectedIds.add(id));
+      render();
+      scheduleCloudSave();
+      showToast(`${pastedIds.length}セルを相対位置で貼り付けました`);
+      return true;
     }
 
     function centerLaneByName(name){
@@ -646,16 +973,16 @@
     }
 
     function getRequestedLane(){
-      try{
+      try {
         const url = new URL(window.location.href);
         const lane = url.searchParams.get("lane");
         return lane ? lane.trim().toUpperCase() : "";
-      }catch(e){
+      } catch(e) {
         return "";
       }
     }
 
-    function showTooltip(text,x,y){
+    function showTooltip(text, x, y){
       tooltip.textContent = text;
       tooltip.style.display = "block";
       const margin = 10;
@@ -672,7 +999,42 @@
       tooltipPinned = true;
     }
 
-    function hideTooltip(){ tooltip.style.display = "none"; tooltipPinned = false; }
+    function hideTooltip(){
+      tooltip.style.display = "none";
+      tooltipPinned = false;
+    }
+
+    function getCellInfoText(id){
+      const storedData = cellData[id];
+      if(storedData && (storedData.date || storedData.size || storedData.containerType || storedData.extend)) {
+        const parts = [];
+        if(storedData.date) parts.push(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`);
+        if(storedData.size) parts.push(`サイズ: ${storedData.size}`);
+        if(storedData.containerType) parts.push(`コンテナ: ${storedData.containerType}`);
+        if(storedData.extend) parts.push(`延長: +1ヶ月`);
+        return parts.join(" / ");
+      }
+      return "移植情報未入力";
+    }
+
+    function showCellActionMenu(id, x, y){
+      if(!id || !cellActionMenu) return;
+      closeMoreMenu();
+      hideTooltip();
+      longPressMenuCellId = id;
+      if(cellActionInfo) cellActionInfo.textContent = getCellInfoText(id);
+      cellActionMenu.classList.add("open");
+      const margin = 10;
+      const rect = cellActionMenu.getBoundingClientRect();
+      let left = x + 10;
+      let top = y - 10;
+      if(left + rect.width > window.innerWidth - margin) left = window.innerWidth - rect.width - margin;
+      if(left < margin) left = margin;
+      if(top + rect.height > window.innerHeight - margin) top = window.innerHeight - rect.height - margin;
+      if(top < margin) top = margin;
+      cellActionMenu.style.left = `${left}px`;
+      cellActionMenu.style.top = `${top}px`;
+    }
 
     function clearDragBox(){
       selectionBox.style.display = "none";
@@ -690,76 +1052,133 @@
       rectModeBtn.style.background = rectSelectMode ? "#00b894" : "#2d3436";
     }
 
+    function markSelectableCacheDirty(){
+      selectableCacheDirty = true;
+    }
+
+    function getCellElement(id){
+      return cellElements.get(id) || null;
+    }
+
+    function getCellIdFromEventTarget(target){
+      if(!target || !target.closest) return "";
+      const cell = target.closest(".cell[data-cell-id]");
+      return cell ? cell.dataset.cellId || "" : "";
+    }
+
+    function updateActivePointersForEvent(e){
+      if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    }
+
+    function updateBaseStageMetrics(){
+      baseStageWidth = zoomStage.scrollWidth || zoomStage.offsetWidth || 1;
+      baseStageHeight = zoomStage.scrollHeight || zoomStage.offsetHeight || 1;
+    }
+
+    function scheduleCacheRebuild(delay = 120){
+      markSelectableCacheDirty();
+      if(cacheRebuildTimer) clearTimeout(cacheRebuildTimer);
+      cacheRebuildTimer = setTimeout(() => {
+        cacheRebuildTimer = 0;
+        rebuildSelectableCellCache(true);
+      }, delay);
+    }
+
     function updateLayoutViewport(){
       const top = layout.getBoundingClientRect().top;
       const safeBottom = 16;
       const h = Math.max(240, window.innerHeight - top - safeBottom);
       layout.style.height = `${h}px`;
-      const baseW = zoomStage.offsetWidth || 1;
-      const baseH = zoomStage.offsetHeight || 1;
-      const scaledW = Math.ceil(baseW * zoomScale);
-      const scaledH = Math.ceil(baseH * zoomScale);
+      const scaledW = Math.ceil(baseStageWidth * zoomScale);
+      const scaledH = Math.ceil(baseStageHeight * zoomScale);
       const extraBottom = Math.max(Math.round(window.innerHeight * 1.1), Math.round(420 * zoomScale));
       layout.style.paddingBottom = `${extraBottom}px`;
       layout.style.paddingRight = `0px`;
-      layoutSpacer.style.width = `1px`;
+      layoutSpacer.style.width = `${Math.max(1, scaledW)}px`;
       layoutSpacer.style.height = `${scaledH + 800}px`;
     }
 
-    function rebuildSelectableCellCache(){
-      const stageRect = zoomStage.getBoundingClientRect();
-      selectableCellCache = [...document.querySelectorAll('.cell[data-cell-id]')].map((el) => {
-        const r = el.getBoundingClientRect();
-        return {
-          id: el.dataset.cellId,
-          left: (r.left - stageRect.left) / zoomScale,
-          top: (r.top - stageRect.top) / zoomScale,
-          right: (r.right - stageRect.left) / zoomScale,
-          bottom: (r.bottom - stageRect.top) / zoomScale,
-        };
-      });
+    function clampScrollPosition(){
+      const maxLeft = Math.max(0, layout.scrollWidth - layout.clientWidth);
+      const maxTop = Math.max(0, layout.scrollHeight - layout.clientHeight);
+      if(layout.scrollLeft < 0) layout.scrollLeft = 0;
+      if(layout.scrollTop < 0) layout.scrollTop = 0;
+      if(layout.scrollLeft > maxLeft) layout.scrollLeft = maxLeft;
+      if(layout.scrollTop > maxTop) layout.scrollTop = maxTop;
     }
 
-    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null){
+    function applySafeDoubleTapZoom(nextZoom, clientX, clientY){
+      const rect = layout.getBoundingClientRect();
+      const beforeScrollTop = layout.scrollTop;
+      const safeAnchorX = clientX;
+      const safeAnchorY = Math.max(rect.top + 24, Math.min(clientY, rect.bottom - 24));
+      zoomScale = nextZoom;
+      applyZoom(true, safeAnchorX, safeAnchorY, true);
+      const maxTop = Math.max(0, layout.scrollHeight - layout.clientHeight);
+      const maxLeft = Math.max(0, layout.scrollWidth - layout.clientWidth);
+      if(layout.scrollTop < 2 || beforeScrollTop < 2) layout.scrollTop = 0;
+      layout.scrollTop = Math.max(0, Math.min(maxTop, layout.scrollTop));
+      layout.scrollLeft = Math.max(0, Math.min(maxLeft, layout.scrollLeft));
+    }
+
+    function rebuildSelectableCellCache(force = false){
+      if(!force && !selectableCacheDirty && selectableCellCache.length) return;
+      selectableCellCache = [];
+      cellElements.forEach((el, id) => {
+        selectableCellCache.push({
+          id,
+          left: el.offsetLeft,
+          top: el.offsetTop,
+          right: el.offsetLeft + el.offsetWidth,
+          bottom: el.offsetTop + el.offsetHeight,
+        });
+      });
+      selectableCacheDirty = false;
+    }
+
+    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null, deferCache = false){
       if(!Number.isFinite(zoomScale) || zoomScale <= 0) zoomScale = 1;
       const rect = layout.getBoundingClientRect();
-      let anchorX = layout.scrollLeft + rect.width / 2;
-      let anchorY = layout.scrollTop + rect.height / 2;
-      if(anchorClientX != null && anchorClientY != null){
-        anchorX = layout.scrollLeft + (anchorClientX - rect.left);
-        anchorY = layout.scrollTop + (anchorClientY - rect.top);
-      }
+      const viewportAnchorX = anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2;
+      const viewportAnchorY = anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2;
+      const safePrevScale = prevZoomScale > 0 ? prevZoomScale : 1;
+      const anchorContentX = (layout.scrollLeft + viewportAnchorX) / safePrevScale;
+      const anchorContentY = (layout.scrollTop + viewportAnchorY) / safePrevScale;
+
       zoomStage.style.transformOrigin = "0 0";
       zoomStage.style.transform = `scale(${zoomScale})`;
       updateLayoutViewport();
-      rebuildSelectableCellCache();
-      if(centered && prevZoomScale > 0){
-        const ratio = zoomScale / prevZoomScale;
-        layout.scrollLeft = anchorX * ratio - (anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2);
-        layout.scrollTop = anchorY * ratio - (anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2);
+
+      if(centered){
+        layout.scrollLeft = anchorContentX * zoomScale - viewportAnchorX;
+        layout.scrollTop = anchorContentY * zoomScale - viewportAnchorY;
       }
+      clampScrollPosition();
+
       prevZoomScale = zoomScale;
+      if(deferCache) scheduleCacheRebuild(isIPadSubMode ? 180 : 120);
+      else rebuildSelectableCellCache(true);
     }
 
     function clientToContent(clientX, clientY){
-      const stageRect = zoomStage.getBoundingClientRect();
+      const rect = layout.getBoundingClientRect();
       return {
-        x: (clientX - stageRect.left) / zoomScale,
-        y: (clientY - stageRect.top) / zoomScale,
+        x: (layout.scrollLeft + clientX - rect.left) / zoomScale,
+        y: (layout.scrollTop + clientY - rect.top) / zoomScale,
       };
     }
 
     function updateDragSelection(){
       dragSelectionLastUpdate = performance.now();
-      if(!selectableCellCache || selectableCellCache.length === 0) rebuildSelectableCellCache();
-      const stageRect = zoomStage.getBoundingClientRect();
+      if(!selectableCellCache.length) rebuildSelectableCellCache();
+      const rect = layout.getBoundingClientRect();
       const currentContent = clientToContent(dragCurrentX, dragCurrentY);
       const leftContent = Math.min(dragStartContentX, currentContent.x);
       const topContent = Math.min(dragStartContentY, currentContent.y);
       const widthContent = Math.abs(currentContent.x - dragStartContentX);
       const heightContent = Math.abs(currentContent.y - dragStartContentY);
-      const left = stageRect.left + leftContent * zoomScale;
-      const top = stageRect.top + topContent * zoomScale;
+      const left = rect.left - layout.scrollLeft + leftContent * zoomScale;
+      const top = rect.top - layout.scrollTop + topContent * zoomScale;
       const width = widthContent * zoomScale;
       const height = heightContent * zoomScale;
       selectionBox.style.display = "block";
@@ -814,37 +1233,43 @@
           moved = true;
         }
       }
-      if(moved) updateDragSelection();
+      if(moved){
+        markSelectableCacheDirty();
+        updateDragSelection();
+      }
       autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
     }
 
     function getTwoFingerDistance(){
       if(activePointers.size !== 2) return 0;
       const pts = [...activePointers.values()];
-      const dx = pts[0].x - pts[1].x;
-      const dy = pts[0].y - pts[1].y;
-      return Math.hypot(dx, dy);
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     }
 
     function updateTwoFingerScroll(){
       suppressDoubleTapUntil = Date.now() + 350;
+      recentTouchScrollUntil = Date.now() + 500;
       if(activePointers.size !== 2) return;
       const pts = [...activePointers.values()];
       const cx = (pts[0].x + pts[1].x) / 2;
       const cy = (pts[0].y + pts[1].y) / 2;
       const dist = getTwoFingerDistance();
-      if(lastCenterX || lastCenterY){
-        layout.scrollLeft -= (cx - lastCenterX) * 1.2;
-        layout.scrollTop -= (cy - lastCenterY) * 1.2;
+      const hadPrevCenter = lastCenterX !== 0 || lastCenterY !== 0;
+      const hadPrevDistance = lastPinchDistance > 0;
+
+      if(hadPrevCenter){
+        layout.scrollLeft -= (cx - lastCenterX);
+        layout.scrollTop -= (cy - lastCenterY);
       }
-      if(lastPinchDistance > 0 && dist > 0){
+
+      if(hadPrevDistance && dist > 0){
         const ratio = dist / lastPinchDistance;
         const delta = Math.abs(dist - lastPinchDistance);
         if(delta > 3 && Math.abs(ratio - 1) > 0.004){
           const nextZoom = Math.max(0.2, Math.min(2, zoomScale * ratio));
           if(Math.abs(nextZoom - zoomScale) > 0.002){
             zoomScale = nextZoom;
-            applyZoom(true, cx, cy);
+            applyZoom(true, cx, cy, true);
           }
         }
       }
@@ -854,18 +1279,26 @@
     }
 
     function updateSelectionVisuals(){
-      document.querySelectorAll(".cell.selected").forEach((el)=> el.classList.remove("selected"));
-      selectedIds.forEach((id)=>{
-        const el = document.querySelector(`.cell[data-cell-id="${id}"]`);
+      prevSelectedVisualIds.forEach((id) => {
+        if(selectedIds.has(id)) return;
+        const el = getCellElement(id);
+        if(el) el.classList.remove("selected");
+      });
+      selectedIds.forEach((id) => {
+        if(prevSelectedVisualIds.has(id)) return;
+        const el = getCellElement(id);
         if(el) el.classList.add("selected");
       });
-      const laneNames = [...new Set([...selectedIds].map((id) => id.split("-")[0]).filter((name) => name))];
+      prevSelectedVisualIds = new Set(selectedIds);
+      const laneNames = [...new Set([...selectedIds].map((id) => id.split("-")[0]).filter(Boolean))];
       if(laneNames.length === 0) selectedLaneDisplay.textContent = "-";
       else if(laneNames.length === 1) selectedLaneDisplay.textContent = laneNames[0];
       else selectedLaneDisplay.textContent = laneNames.join(", ");
+      updateCounter();
     }
 
     function selectSingle(id){
+      if(!id) return;
       selectedIds.clear();
       selectedIds.add(id);
       updateSelectionVisuals();
@@ -874,6 +1307,190 @@
     function clearSelection(){
       selectedIds.clear();
       updateSelectionVisuals();
+    }
+
+    function getLaneCellIds(name){
+      const ids = [];
+      const rows = getRows(name);
+      const cols = getCols(name);
+      for(let rr = 1; rr <= rows; rr++){
+        for(let cc = 0; cc < cols; cc++) ids.push(makeId(name, cc, rr));
+      }
+      return ids;
+    }
+
+    function toggleLaneSelection(name){
+      const laneIds = getLaneCellIds(name);
+      const isFullySelected = laneIds.length > 0 && laneIds.every((id) => selectedIds.has(id));
+      if(isFullySelected){
+        laneIds.forEach((id) => selectedIds.delete(id));
+      } else {
+        laneIds.forEach((id) => selectedIds.add(id));
+      }
+      updateSelectionVisuals();
+    }
+
+    function handleCellPointerDown(e, id){
+      activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if(activePointers.size === 2){
+        const pts = [...activePointers.values()];
+        lastCenterX = (pts[0].x + pts[1].x) / 2;
+        lastCenterY = (pts[0].y + pts[1].y) / 2;
+        lastPinchDistance = getTwoFingerDistance();
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+        hideTooltip();
+        clearDragBox();
+        dragSelecting = false;
+        stopAutoScroll();
+        return;
+      }
+      if(moveMode){
+        panLastX = e.clientX;
+        panLastY = e.clientY;
+        return;
+      }
+      pressMoved = false;
+      pressLongFired = false;
+      dragSelecting = false;
+      dragCurrentX = e.clientX;
+      dragCurrentY = e.clientY;
+      const startContent = clientToContent(e.clientX, e.clientY);
+      dragStartContentX = startContent.x;
+      dragStartContentY = startContent.y;
+      pressStartX = e.clientX;
+      pressStartY = e.clientY;
+      hideTooltip();
+      clearDragBox();
+      if(pressTimer) clearTimeout(pressTimer);
+      pressTimer = window.setTimeout(() => {
+        pressLongFired = true;
+        if(!selectedIds.has(id)) selectSingle(id);
+        showCellActionMenu(id, e.clientX, e.clientY);
+      }, 600);
+    }
+
+    function handleCellPointerMove(e){
+      if(moveMode && activePointers.has(e.pointerId) && activePointers.size < 2){
+        const dx = e.clientX - panLastX;
+        const dy = e.clientY - panLastY;
+        layout.scrollLeft -= dx;
+        layout.scrollTop -= dy;
+        panLastX = e.clientX;
+        panLastY = e.clientY;
+        activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+        if(e.pointerType === "touch" && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) recentTouchScrollUntil = Date.now() + 450;
+        return;
+      }
+      if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
+      updateActivePointersForEvent(e);
+      if(activePointers.size === 2){
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+        hideTooltip();
+        dragSelecting = false;
+        clearDragBox();
+        updateTwoFingerScroll();
+        return;
+      }
+      const dx = Math.abs(e.clientX - pressStartX);
+      const dy = Math.abs(e.clientY - pressStartY);
+      if(dx > 8 || dy > 8){
+        pressMoved = true;
+        if(e.pointerType === "touch") recentTouchScrollUntil = Date.now() + 450;
+        if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+      }
+      if(pressMoved && !pressLongFired && rectSelectMode){
+        if(!dragSelecting) rebuildSelectableCellCache();
+        dragSelecting = true;
+        dragCurrentX = e.clientX;
+        dragCurrentY = e.clientY;
+        const rect = layout.getBoundingClientRect();
+        const edge = isIPadSubMode ? 60 : 80;
+        autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
+        const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
+        const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
+        autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
+        updateDragSelectionThrottled();
+        if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
+      }
+    }
+
+    function handleCellPointerUp(e, id){
+      activePointers.delete(e.pointerId);
+      if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
+      if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+      autoScrollDirX = 0;
+      autoScrollDirY = 0;
+      if(!id){
+        if(dragSelecting){
+          stopAutoScroll();
+          clearDragBox();
+          updateSelectionVisuals();
+        }
+        return;
+      }
+      if(dragSelecting){
+        stopAutoScroll();
+        clearDragBox();
+        updateSelectionVisuals();
+      } else if(!rectSelectMode && !pressLongFired && !pressMoved){
+        const now = Date.now();
+        if(now < suppressDoubleTapUntil){
+          lastTapTime = 0;
+          selectSingle(id);
+          return;
+        }
+        const dt = now - lastTapTime;
+        const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
+        const canDoubleTapZoom = !disableDoubleTapZoom
+          && e.pointerType === "touch"
+          && now >= recentTouchScrollUntil
+          && dt > 0
+          && dt < 280
+          && tapMove <= 18;
+        if(canDoubleTapZoom){
+          const nextZoom = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
+          applySafeDoubleTapZoom(nextZoom, e.clientX, e.clientY);
+          lastTapTime = 0;
+          lastTouchUpX = 0;
+          lastTouchUpY = 0;
+          return;
+        }
+        lastTapTime = now;
+        lastTouchUpX = e.clientX;
+        lastTouchUpY = e.clientY;
+        selectSingle(id);
+      }
+    }
+
+    function handleCellPointerLeave(){
+      if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+    }
+
+    function installSafariDoubleTapBlocker(){
+      if(!disableDoubleTapZoom) return;
+      const target = layout;
+      if(!target) return;
+      if(viewportMeta){
+        viewportMeta.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover");
+      }
+      target.style.touchAction = "manipulation";
+      target.addEventListener("touchend", (e) => {
+        if(!e.changedTouches || e.changedTouches.length !== 1) return;
+        const touch = e.changedTouches[0];
+        const now = Date.now();
+        const dt = now - lastSafariTouchEndTime;
+        const move = Math.hypot(touch.clientX - lastSafariTouchEndX, touch.clientY - lastSafariTouchEndY);
+        const inInteractiveArea = target.contains(e.target);
+        if(inInteractiveArea){
+          e.preventDefault();
+        }
+        if(inInteractiveArea && dt > 0 && dt < 320 && move < 24){
+          e.preventDefault();
+        }
+        lastSafariTouchEndTime = now;
+        lastSafariTouchEndX = touch.clientX;
+        lastSafariTouchEndY = touch.clientY;
+      }, { passive: false, capture: true });
     }
 
     function openDateModal(){
@@ -918,7 +1535,7 @@
         isApplyingRemoteState = true;
         try {
           Object.keys(cellData).forEach((k) => delete cellData[k]);
-          Object.entries(data.cellData || {}).forEach(([k,v]) => { cellData[k] = v; });
+          Object.entries(data.cellData || {}).forEach(([k, v]) => { cellData[k] = v; });
           if(typeof data.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, data.zoomScale));
           if(data.rate) rateSelect.value = String(data.rate);
           render();
@@ -941,7 +1558,7 @@
         return;
       }
       snapshotState();
-      selectedIds.forEach((id)=>{
+      selectedIds.forEach((id) => {
         if(!cellData[id]) cellData[id] = {};
         if(entryDate.value) cellData[id].date = entryDate.value;
         else delete cellData[id].date;
@@ -949,6 +1566,7 @@
         else delete cellData[id].size;
         if(entryContainer.value) cellData[id].containerType = entryContainer.value;
         else delete cellData[id].containerType;
+        if(!cellData[id].extend) delete cellData[id].extendAppliedAt;
         if(!cellData[id].date && !cellData[id].extend && !cellData[id].size && !cellData[id].containerType){
           delete cellData[id];
         }
@@ -962,9 +1580,11 @@
     function toggleExtendSelection(){
       if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
       snapshotState();
-      selectedIds.forEach((id)=>{
+      selectedIds.forEach((id) => {
         if(!cellData[id]) cellData[id] = {};
         cellData[id].extend = !cellData[id].extend;
+        if(cellData[id].extend) cellData[id].extendAppliedAt = todayString();
+        else delete cellData[id].extendAppliedAt;
         if(!cellData[id].date && !cellData[id].extend && !cellData[id].size && !cellData[id].containerType) delete cellData[id];
       });
       render();
@@ -975,7 +1595,7 @@
     function deleteSelection(){
       if(selectedIds.size === 0){ alert("コンテナを選択してください"); return; }
       snapshotState();
-      selectedIds.forEach((id)=> delete cellData[id]);
+      selectedIds.forEach((id) => delete cellData[id]);
       render();
       scheduleCloudSave();
     }
@@ -985,8 +1605,8 @@
       redoStack.push(JSON.stringify(cellData));
       if(redoStack.length > 20) redoStack.shift();
       const prev = JSON.parse(historyStack.pop());
-      Object.keys(cellData).forEach(k => delete cellData[k]);
-      Object.entries(prev).forEach(([k,v]) => { cellData[k] = v; });
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.entries(prev).forEach(([k, v]) => { cellData[k] = v; });
       render();
       scheduleCloudSave();
     }
@@ -996,16 +1616,15 @@
       historyStack.push(JSON.stringify(cellData));
       if(historyStack.length > 20) historyStack.shift();
       const next = JSON.parse(redoStack.pop());
-      Object.keys(cellData).forEach(k => delete cellData[k]);
-      Object.entries(next).forEach(([k,v]) => { cellData[k] = v; });
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.entries(next).forEach(([k, v]) => { cellData[k] = v; });
       render();
       scheduleCloudSave();
     }
 
     function resetAll(){
-      if(!confirm(`本当に初期化しますか？
-移植日・延長・選択状態が消えます。`)) return;
-      Object.keys(cellData).forEach(k => delete cellData[k]);
+      if(!confirm(`本当に初期化しますか？\n移植日・延長・選択状態が消えます。`)) return;
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
       selectedIds.clear();
       historyStack.length = 0;
       redoStack.length = 0;
@@ -1016,18 +1635,15 @@
     function render(){
       updateCounter();
       zoomStage.innerHTML = "";
+      cellElements.clear();
+      prevSelectedVisualIds = new Set();
+      const frag = document.createDocumentFragment();
       for(const name of layoutOrder){
         const line = document.createElement("div");
         line.className = "line";
 
         const selectWholeLane = () => {
-          selectedIds.clear();
-          const rows = getRows(name);
-          const cols = getCols(name);
-          for(let rr=1; rr<=rows; rr++){
-            for(let cc=0; cc<cols; cc++) selectedIds.add(makeId(name, cc, rr));
-          }
-          updateSelectionVisuals();
+          toggleLaneSelection(name);
         };
 
         const title = document.createElement("div");
@@ -1061,155 +1677,32 @@
           );
         };
 
-        for(let r=1; r<=totalRows; r++){
-          for(let c=0; c<cols; c++){
+        for(let r = 1; r <= totalRows; r++){
+          for(let c = 0; c < cols; c++){
             const cell = document.createElement("div");
-            if(r <= offset || r > offset + rows){
-              cell.className = "cell blank-cell";
-              cell.textContent = "";
-            } else {
-              const realRow = r - offset;
-              const id = makeId(name, c, realRow);
-              const stored = cellData[id];
-              const growthClass = getGrowthClass(stored);
-              cell.className = "cell" + (isLane(name) ? "" : " path-cell");
-              if(growthClass) cell.classList.add(growthClass);
-              if(stored && stored.extend) cell.classList.add("extend-cell");
-              if(stored && stored.date){
-                if(hasSameGroupNeighbor(c, realRow, -1, 0)) cell.classList.add("merge-left");
-                if(hasSameGroupNeighbor(c, realRow, 1, 0)) cell.classList.add("merge-right");
-                if(hasSameGroupNeighbor(c, realRow, 0, -1)) cell.classList.add("merge-up");
-                if(hasSameGroupNeighbor(c, realRow, 0, 1)) cell.classList.add("merge-down");
-              }
-              if(selectedIds.has(id)) cell.classList.add("selected");
-              cell.textContent = String(realRow);
-              cell.dataset.cellId = id;
-
-              cell.addEventListener("pointerdown", (e)=>{
-                if(moveMode){
-                  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-                  panLastX = e.clientX;
-                  panLastY = e.clientY;
-                }
-                activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-                if(activePointers.size === 2){
-                  const pts = [...activePointers.values()];
-                  lastCenterX = (pts[0].x + pts[1].x) / 2;
-                  lastCenterY = (pts[0].y + pts[1].y) / 2;
-                  lastPinchDistance = getTwoFingerDistance();
-                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                  hideTooltip();
-                  clearDragBox();
-                  dragSelecting = false;
-                  stopAutoScroll();
-                  return;
-                }
-                pressMoved = false;
-                pressLongFired = false;
-                dragSelecting = false;
-                dragCurrentX = e.clientX;
-                dragCurrentY = e.clientY;
-                const startContent = clientToContent(e.clientX, e.clientY);
-                dragStartContentX = startContent.x;
-                dragStartContentY = startContent.y;
-                pressStartX = e.clientX;
-                pressStartY = e.clientY;
-                hideTooltip();
-                clearDragBox();
-                if(pressTimer) clearTimeout(pressTimer);
-                pressTimer = window.setTimeout(()=>{
-                  pressLongFired = true;
-                  const storedData = cellData[id];
-                  if(storedData && (storedData.date || storedData.size || storedData.containerType || storedData.extend)) {
-                    const parts = [];
-                    if(storedData.date) parts.push(`移植日: ${storedData.date} / ${daysSince(storedData.date)}日経過`);
-                    if(storedData.size) parts.push(`サイズ: ${storedData.size}`);
-                    if(storedData.containerType) parts.push(`コンテナ: ${storedData.containerType}`);
-                    if(storedData.extend) parts.push(`延長: +1ヶ月`);
-                    showTooltip(parts.join(" / "), e.clientX, e.clientY);
-                  } else {
-                    showTooltip("移植情報未入力", e.clientX, e.clientY);
-                  }
-                }, 600);
-              });
-
-              cell.addEventListener("pointermove", (e)=>{
-                if(moveMode && activePointers.has(e.pointerId) && activePointers.size < 2){
-                  const dx = e.clientX - panLastX;
-                  const dy = e.clientY - panLastY;
-                  layout.scrollLeft -= dx;
-                  layout.scrollTop -= dy;
-                  panLastX = e.clientX;
-                  panLastY = e.clientY;
-                  activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-                  return;
-                }
-                if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
-                if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
-                if(activePointers.size === 2){
-                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                  hideTooltip();
-                  dragSelecting = false;
-                  clearDragBox();
-                  updateTwoFingerScroll();
-                  return;
-                }
-                const dx = Math.abs(e.clientX - pressStartX);
-                const dy = Math.abs(e.clientY - pressStartY);
-                if(dx > 8 || dy > 8){
-                  pressMoved = true;
-                  if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                }
-                if(pressMoved && !pressLongFired && rectSelectMode){
-                  if(!dragSelecting) rebuildSelectableCellCache();
-                  dragSelecting = true;
-                  dragCurrentX = e.clientX;
-                  dragCurrentY = e.clientY;
-                  const rect = layout.getBoundingClientRect();
-                  const edge = 80;
-                  autoScrollDirX = dragCurrentX < rect.left + edge ? -1 : dragCurrentX > rect.right - edge ? 1 : 0;
-                  const nearTop = dragCurrentY < rect.top + edge || dragCurrentY < edge;
-                  const nearBottom = dragCurrentY > rect.bottom - edge || dragCurrentY > window.innerHeight - edge;
-                  autoScrollDirY = nearTop ? -1 : nearBottom ? 1 : 0;
-                  updateDragSelectionThrottled();
-                  if(!autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollWhileSelecting);
-                }
-              });
-
-              cell.addEventListener("pointerup", (e)=>{
-                activePointers.delete(e.pointerId);
-                if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
-                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-                autoScrollDirX = 0;
-                autoScrollDirY = 0;
-                if(dragSelecting){
-                  stopAutoScroll();
-                  clearDragBox();
-                  updateSelectionVisuals();
-                } else if(!rectSelectMode && !pressLongFired && !pressMoved){
-                  const now = Date.now();
-                  if(now < suppressDoubleTapUntil){
-                    lastTapTime = 0;
-                    selectSingle(id);
-                    return;
-                  }
-                  const dt = now - lastTapTime;
-                  if(e.pointerType === "touch" && dt > 0 && dt < 280){
-                    const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
-                    zoomScale = nextZoom;
-                    applyZoom(true, e.clientX, e.clientY);
-                    lastTapTime = 0;
-                    return;
-                  }
-                  lastTapTime = now;
-                  selectSingle(id);
-                }
-              });
-
-              cell.addEventListener("pointerleave", ()=>{
-                if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-              });
+            const realRow = r - offset;
+            const isBlank = realRow < 1 || realRow > rows;
+            cell.className = "cell";
+            if(isBlank){
+              cell.classList.add("blank-cell");
+              grid.appendChild(cell);
+              continue;
             }
+            if(!isLane(name)) cell.classList.add("path-cell");
+
+            const id = makeId(name, c, realRow);
+            const stored = cellData[id];
+            const growthClass = getGrowthClass(stored);
+            if(growthClass) cell.classList.add(growthClass);
+            if(shouldShowExtendFrame(stored)) cell.classList.add("extend-cell");
+            if(selectedIds.has(id)) cell.classList.add("selected");
+            if(hasSameGroupNeighbor(c, realRow, -1, 0)) cell.classList.add("merge-left");
+            if(hasSameGroupNeighbor(c, realRow, 1, 0)) cell.classList.add("merge-right");
+            if(hasSameGroupNeighbor(c, realRow, 0, -1)) cell.classList.add("merge-up");
+            if(hasSameGroupNeighbor(c, realRow, 0, 1)) cell.classList.add("merge-down");
+            cell.dataset.cellId = id;
+            cell.textContent = String(realRow);
+            cellElements.set(id, cell);
             grid.appendChild(cell);
           }
         }
@@ -1223,12 +1716,46 @@
         bottomTitle.addEventListener("click", selectWholeLane);
         line.appendChild(bottomTitle);
 
-        zoomStage.appendChild(line);
+        frag.appendChild(line);
       }
-      rebuildSelectableCellCache();
+      zoomStage.appendChild(frag);
+      updateBaseStageMetrics();
+      markSelectableCacheDirty();
+      rebuildSelectableCellCache(true);
+      updateSelectionVisuals();
     }
 
-    layout.addEventListener("pointerdown", (e)=>{
+    zoomStage.addEventListener("pointerdown", (e) => {
+      const id = getCellIdFromEventTarget(e.target);
+      if(!id) return;
+      handleCellPointerDown(e, id);
+    }, { passive: true });
+
+    zoomStage.addEventListener("pointermove", (e) => {
+      const id = getCellIdFromEventTarget(e.target);
+      if(!id && !activePointers.has(e.pointerId)) return;
+      handleCellPointerMove(e);
+    }, { passive: true });
+
+    zoomStage.addEventListener("pointerup", (e) => {
+      const id = getCellIdFromEventTarget(e.target);
+      if(!id && !activePointers.has(e.pointerId)) return;
+      handleCellPointerUp(e, id || "");
+    }, { passive: true });
+
+    zoomStage.addEventListener("pointerleave", (e) => {
+      const id = getCellIdFromEventTarget(e.target);
+      if(!id) return;
+      handleCellPointerLeave();
+    }, { passive: true });
+
+    zoomStage.addEventListener("pointercancel", () => {
+      handleCellPointerLeave();
+      dragSelecting = false;
+      stopAutoScroll();
+    }, { passive: true });
+
+    layout.addEventListener("pointerdown", (e) => {
       if(moveMode){
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
         panLastX = e.clientX;
@@ -1264,7 +1791,7 @@
       if(pressTimer) clearTimeout(pressTimer);
     });
 
-    layout.addEventListener("pointermove", (e)=>{
+    layout.addEventListener("pointermove", (e) => {
       if(!activePointers.has(e.pointerId)) return;
       if(moveMode && activePointers.size < 2){
         const dx = e.clientX - panLastX;
@@ -1274,6 +1801,7 @@
         panLastX = e.clientX;
         panLastY = e.clientY;
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+        if(e.pointerType === "touch" && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) recentTouchScrollUntil = Date.now() + 450;
         return;
       }
       if(!pressTimer && !dragSelecting && activePointers.size < 2) return;
@@ -1291,6 +1819,7 @@
       const dy = Math.abs(e.clientY - pressStartY);
       if(dx > 8 || dy > 8){
         pressMoved = true;
+        if(e.pointerType === "touch") recentTouchScrollUntil = Date.now() + 450;
         if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
       }
       if(pressMoved && rectSelectMode){
@@ -1309,7 +1838,7 @@
       }
     });
 
-    layout.addEventListener("pointerup", (e)=>{
+    layout.addEventListener("pointerup", (e) => {
       if(!activePointers.has(e.pointerId)) return;
       activePointers.delete(e.pointerId);
       if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
@@ -1323,23 +1852,39 @@
       }
       if(!moveMode && e.pointerType === "touch"){
         const now = Date.now();
-        if(now < suppressDoubleTapUntil){
+        if(now < suppressDoubleTapUntil || now < recentTouchScrollUntil){
           lastTapTime = 0;
+          lastTouchUpX = e.clientX;
+          lastTouchUpY = e.clientY;
           return;
         }
         const dt = now - lastTapTime;
-        if(dt > 0 && dt < 280){
-          const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
-          zoomScale = nextZoom;
-          applyZoom(true, e.clientX, e.clientY);
+        const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
+        if(!disableDoubleTapZoom && dt > 0 && dt < 280 && tapMove <= 18){
+          const nextZoom = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
+          applySafeDoubleTapZoom(nextZoom, e.clientX, e.clientY);
           lastTapTime = 0;
+          lastTouchUpX = 0;
+          lastTouchUpY = 0;
           return;
         }
         lastTapTime = now;
+        lastTouchUpX = e.clientX;
+        lastTouchUpY = e.clientY;
       }
     });
 
     entryCancelBtn.addEventListener("click", closeEntryModal);
+    longPressCopyBtn.addEventListener("click", () => {
+      if(longPressMenuCellId && !selectedIds.has(longPressMenuCellId)) selectSingle(longPressMenuCellId);
+      const ok = copySelectedCellData();
+      if(ok) closeCellActionMenu();
+    });
+    longPressPasteBtn.addEventListener("click", () => {
+      if(longPressMenuCellId && !selectedIds.has(longPressMenuCellId)) selectSingle(longPressMenuCellId);
+      const ok = pasteToSelectedCells();
+      if(ok) closeCellActionMenu();
+    });
     entrySaveBtn.addEventListener("click", applyDateToSelection);
     entryModal.addEventListener("click", (e) => {
       if(e.target === entryModal) closeEntryModal();
@@ -1357,8 +1902,8 @@
       e.stopPropagation();
       moreMenuPanel.classList.toggle("open");
     });
-    rateSelect.addEventListener("change", ()=> { updateCounter(); scheduleCloudSave(); });
-    moveModeBtn.addEventListener("click", ()=>{
+    rateSelect.addEventListener("change", () => { updateCounter(); scheduleCloudSave(); });
+    moveModeBtn.addEventListener("click", () => {
       moveMode = !moveMode;
       if(moveMode){
         rectSelectMode = false;
@@ -1369,7 +1914,7 @@
       hideTooltip();
       updateMoveModeButton();
     });
-    rectModeBtn.addEventListener("click", ()=>{
+    rectModeBtn.addEventListener("click", () => {
       rectSelectMode = !rectSelectMode;
       if(rectSelectMode){
         moveMode = false;
@@ -1380,24 +1925,101 @@
       hideTooltip();
       updateRectModeButton();
     });
-    document.addEventListener("pointerdown", (e)=>{
+    document.addEventListener("pointerdown", (e) => {
       if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
+      if(cellActionMenu && !e.target.closest("#cellActionMenu") && !e.target.closest(".cell")) closeCellActionMenu();
       if(!tooltipPinned) return;
       if(e.target.closest && e.target.closest(".cell") && pressLongFired) return;
       hideTooltip();
     });
-    window.addEventListener("resize", ()=> {
+
+    document.addEventListener("keydown", (e) => {
+      if(e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA")) return;
+      const key = String(e.key || "").toLowerCase();
+      if((e.ctrlKey || e.metaKey) && key === "c"){
+        e.preventDefault();
+        copySelectedCellData();
+      }
+      if((e.ctrlKey || e.metaKey) && key === "v"){
+        e.preventDefault();
+        pasteToSelectedCells();
+      }
+    });
+
+    window.addEventListener("resize", () => {
       applyZoom(false);
+      clampScrollPosition();
       rebuildSelectableCellCache();
     });
 
+    document.addEventListener("gesturestart", (e) => {
+      if(!disableDoubleTapZoom) return;
+      if(e.touches && e.touches.length > 1) return;
+      e.preventDefault();
+    }, { passive: false });
+
+    function runDevChecks(){
+      console.assert(typeof updateSelectedCounter === "function", "updateSelectedCounter should exist");
+      console.assert(getReadyCount() === 0, "empty ready count should be 0");
+      console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" }) === true, "regular ready cell should count");
+      console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "ヒノキ" }) === false, "hinoki should not count");
+      console.assert(isReadyCountTarget({ date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "松" }) === false, "matsu should not count");
+      const parsed = parseCellId("P10-11-1-23");
+      console.assert(parsed && parsed.lane === "P10-11" && parsed.col === 1 && parsed.row === 23, "parseCellId should parse path ids");
+      layout.scrollTop = -50;
+      layout.scrollLeft = -50;
+      clampScrollPosition();
+      console.assert(layout.scrollTop === 0 && layout.scrollLeft === 0, "clampScrollPosition should keep scroll within bounds");
+      console.assert(typeof applySafeDoubleTapZoom === "function", "safe double tap zoom helper should exist");
+      console.assert(typeof disableDoubleTapZoom === "boolean", "disableDoubleTapZoom flag should exist");
+      console.assert(typeof installSafariDoubleTapBlocker === "function", "safari double tap blocker should exist");
+      console.assert(!!viewportMeta, "viewport meta should exist");
+      console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: todayString() }) === true, "fresh extend frame should show");
+      console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10) }) === false, "old extend frame should hide");
+      Object.keys(cellData).forEach((k) => delete cellData[k]);
+      selectedIds.clear();
+      cellData["L1-0-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
+      cellData["L1-1-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
+      rateSelect.value = "0.5";
+      updateCounter();
+      console.assert(counter.textContent.includes("出荷可能コンテナ: 2"), "global counter should show total ready count");
+      console.assert(calcResult.textContent === "苗数: 40", "global seedlings should use total ready count");
+      selectedIds.add("L1-0-1");
+      updateCounter();
+      console.assert(counter.textContent.includes("出荷可能コンテナ: 2"), "single selected cell should still show global counter");
+      console.assert(calcResult.textContent === "苗数: 40", "single selected cell should still use total seedlings");
+      selectedIds.add("L1-1-1");
+      updateCounter();
+      console.assert(counter.textContent.includes("選択中の出荷可能: 2"), "multi selection should show selected counter");
+      console.assert(calcResult.textContent === "苗数: 40", "multi selected cells should use selected seedlings when selection equals total");
+      cellData["L1-2-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
+      selectedIds.delete("L1-1-1");
+      updateCounter();
+      console.assert(calcResult.textContent === "苗数: 60", "single selected cell should keep total seedlings even when total differs");
+      selectedIds.add("L1-1-1");
+      updateCounter();
+      console.assert(calcResult.textContent === "苗数: 40", "multi selected cells should use selected seedlings when partial selection exists");
+      const before = selectedIds.size;
+      selectSingle("");
+      console.assert(selectedIds.size === before, "empty id should not become selected");
+      selectedIds.clear();
+      toggleLaneSelection("L1");
+      console.assert(getLaneCellIds("L1").every((id) => selectedIds.has(id)), "lane tap should select full lane");
+      toggleLaneSelection("L1");
+      console.assert(getLaneCellIds("L1").every((id) => !selectedIds.has(id)), "second lane tap should clear same lane");
+    }
+
+    if(isIPadSubMode) document.body.classList.add("ipad-sub");
     loadLocalState();
+    loadCellClipboard();
     prevZoomScale = zoomScale;
     updateMoveModeButton();
     updateRectModeButton();
     render();
     applyZoom(false);
     updateSelectionVisuals();
+    runDevChecks();
+    installSafariDoubleTapBlocker();
     subscribeCloud();
 
     const requestedLane = getRequestedLane();
