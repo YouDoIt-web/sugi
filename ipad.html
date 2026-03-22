@@ -391,6 +391,35 @@
     .flash-lane {
       box-shadow: 0 0 0 4px #ffeaa7 inset, 0 0 0 3px #fdcb6e !important;
     }
+  
+    .daily-list-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: #fff;
+    }
+    .daily-list-table th,
+    .daily-list-table td {
+      border: 1px solid #dfe6e9;
+      padding: 8px 6px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .daily-list-table th {
+      background: #f5f7f8;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .daily-list-table td.left {
+      text-align: left;
+    }
+    .daily-list-table select {
+      width: 72px;
+      padding: 4px 6px;
+      border-radius: 6px;
+    }
+
   </style>
 </head>
 <body>
@@ -400,6 +429,7 @@
         <button id="moreMenuBtn" type="button" aria-label="メニュー">☰</button>
         <div id="moreMenuPanel">
           <button id="summaryBtn" type="button">集計</button>
+          <button id="dailyListBtn" type="button">日別リスト</button>
           <button id="copyBtn" type="button">コピー保存</button>
           <button id="pasteImportBtn" type="button">貼り付け読込</button>
           <button id="resetBtn" type="button">初期化</button>
@@ -465,6 +495,17 @@
         <button id="summaryAllBtn" type="button">全選択</button>
         <button id="summaryCloseBtn" type="button">閉じる</button>
       </div>
+    </div>
+  </div>
+
+  <div id="dailyListModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:11560;display:none;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">
+    <div id="dailyListBox" style="width:min(96vw,980px);max-height:88vh;overflow:auto;background:#fff;border-radius:14px;padding:14px;box-sizing:border-box;box-shadow:0 10px 28px rgba(0,0,0,0.2);">
+      <h2 style="margin:0 0 12px;font-size:16px;">日別リスト</h2>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px;flex-wrap:wrap;">
+        <button id="dailyListCopyBtn" type="button">表をコピー</button>
+        <button id="dailyListCloseBtn" type="button">閉じる</button>
+      </div>
+      <div id="dailyListTableWrap"></div>
     </div>
   </div>
 
@@ -534,6 +575,7 @@
 
     const selectedIds = new Set();
     const cellData = {};
+    const peopleByDate = {};
     const historyStack = [];
     const redoStack = [];
     const cellElements = new Map();
@@ -578,6 +620,11 @@
     const summaryResult = document.getElementById("summaryResult");
     const summaryCloseBtn = document.getElementById("summaryCloseBtn");
     const summaryAllBtn = document.getElementById("summaryAllBtn");
+    const dailyListBtn = document.getElementById("dailyListBtn");
+    const dailyListModal = document.getElementById("dailyListModal");
+    const dailyListTableWrap = document.getElementById("dailyListTableWrap");
+    const dailyListCopyBtn = document.getElementById("dailyListCopyBtn");
+    const dailyListCloseBtn = document.getElementById("dailyListCloseBtn");
     const entryModal = document.getElementById("entryModal");
     const entryDate = document.getElementById("entryDate");
     const entrySize = document.getElementById("entrySize");
@@ -901,7 +948,7 @@
 
     function saveLocalState(){
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({cellData, zoomScale, rate: rateSelect.value}));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({cellData, peopleByDate, zoomScale, rate: rateSelect.value}));
       } catch(e){
         console.warn("save local failed", e);
       }
@@ -916,6 +963,10 @@
         const loadedCells = parsed.cellData && typeof parsed.cellData === "object" ? parsed.cellData : parsed;
         Object.keys(cellData).forEach((k) => delete cellData[k]);
         Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
+        Object.keys(peopleByDate).forEach((k) => delete peopleByDate[k]);
+        if(parsed.peopleByDate && typeof parsed.peopleByDate === "object"){
+          Object.entries(parsed.peopleByDate).forEach(([k, v]) => { peopleByDate[k] = String(v); });
+        }
         if(typeof parsed.zoomScale === "number" && Number.isFinite(parsed.zoomScale)) {
           zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
         }
@@ -936,6 +987,7 @@
         exportedAt: new Date().toISOString(),
         zoomScale,
         rate: rateSelect.value,
+        peopleByDate,
         cellData
       };
     }
@@ -959,6 +1011,10 @@
 
       Object.keys(cellData).forEach((k) => delete cellData[k]);
       Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
+      Object.keys(peopleByDate).forEach((k) => delete peopleByDate[k]);
+      if(parsed && parsed.peopleByDate && typeof parsed.peopleByDate === "object"){
+        Object.entries(parsed.peopleByDate).forEach(([k, v]) => { peopleByDate[k] = String(v); });
+      }
 
       if(typeof parsed.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
       if(parsed.rate) rateSelect.value = String(parsed.rate);
@@ -970,6 +1026,138 @@
       applyZoom(false);
       updateSelectionVisuals();
       scheduleCloudSave();
+    }
+
+
+    function getJaWeekday(dateString){
+      const d = new Date(`${dateString}T00:00:00`);
+      if(Number.isNaN(d.getTime())) return "";
+      return ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
+    }
+
+    function buildDailyListRows(){
+      const counts = {};
+      Object.values(cellData).forEach((value) => {
+        if(!value || !value.date) return;
+        const date = value.date;
+        counts[date] = (counts[date] || 0) + 1;
+      });
+
+      return Object.keys(counts)
+        .sort((a, b) => a.localeCompare(b))
+        .map((date) => {
+          const containerCount = counts[date];
+          return {
+            date,
+            weekday: getJaWeekday(date),
+            people: peopleByDate[date] || "",
+            containerCount,
+            seedlingCount: containerCount * 40
+          };
+        });
+    }
+
+    function buildPeopleOptions(selectedValue){
+      const options = ['<option value=""></option>'];
+      for(let i = 1; i <= 20; i += 1){
+        const selected = String(selectedValue) === String(i) ? " selected" : "";
+        options.push(`<option value="${i}"${selected}>${i}</option>`);
+      }
+      return options.join("");
+    }
+
+    function renderDailyListTable(){
+      const rows = buildDailyListRows();
+      if(!dailyListTableWrap) return;
+
+      if(rows.length === 0){
+        dailyListTableWrap.innerHTML = '<div style="padding:12px;background:#f5f7f8;border-radius:8px;">データがありません</div>';
+        return;
+      }
+
+      dailyListTableWrap.innerHTML = `
+        <table class="daily-list-table">
+          <thead>
+            <tr>
+              <th>日付</th>
+              <th>曜日</th>
+              <th>人数</th>
+              <th>コンテナ数</th>
+              <th>苗木本数</th>
+              <th>予定</th>
+              <th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${row.date}</td>
+                <td>${row.weekday}</td>
+                <td>
+                  <select class="daily-people-select" data-date="${row.date}">
+                    ${buildPeopleOptions(row.people)}
+                  </select>
+                </td>
+                <td>${row.containerCount}</td>
+                <td>${row.seedlingCount}</td>
+                <td></td>
+                <td></td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+
+      dailyListTableWrap.querySelectorAll(".daily-people-select").forEach((select) => {
+        select.addEventListener("change", () => {
+          const date = select.dataset.date;
+          if(!date) return;
+          if(select.value) peopleByDate[date] = select.value;
+          else delete peopleByDate[date];
+          saveLocalState();
+          scheduleCloudSave();
+        });
+      });
+    }
+
+    function openDailyListModal(){
+      renderDailyListTable();
+      if(dailyListModal) dailyListModal.style.display = "flex";
+    }
+
+    function closeDailyListModal(){
+      if(dailyListModal) dailyListModal.style.display = "none";
+    }
+
+    async function copyDailyListTable(){
+      const rows = buildDailyListRows();
+      if(rows.length === 0){
+        alert("コピーするデータがありません");
+        return;
+      }
+
+      const lines = [];
+      lines.push(["日付","曜日","人数","コンテナ数","苗木本数","予定","備考"].join("\t"));
+
+      rows.forEach((row) => {
+        lines.push([
+          row.date,
+          row.weekday,
+          peopleByDate[row.date] || "",
+          row.containerCount,
+          row.seedlingCount,
+          "",
+          ""
+        ].join("\t"));
+      });
+
+      try {
+        await navigator.clipboard.writeText(lines.join("\n"));
+        showToast("日別リストをコピーしました");
+      } catch(e){
+        console.error(e);
+        alert("表のコピーに失敗しました");
+      }
     }
 
     function importFromPaste(){
@@ -1594,6 +1782,7 @@
         try {
           await setDoc(cloudRef, {
             cellData,
+            peopleByDate,
             zoomScale,
             rate: rateSelect.value,
             updatedAt: Date.now()
@@ -1619,6 +1808,8 @@
         try {
           Object.keys(cellData).forEach((k) => delete cellData[k]);
           Object.entries(data.cellData || {}).forEach(([k, v]) => { cellData[k] = v; });
+          Object.keys(peopleByDate).forEach((k) => delete peopleByDate[k]);
+          Object.entries(data.peopleByDate || {}).forEach(([k, v]) => { peopleByDate[k] = String(v); });
           if(typeof data.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, data.zoomScale));
           if(data.rate) rateSelect.value = String(data.rate);
           render();
@@ -1708,6 +1899,7 @@
     function resetAll(){
       if(!confirm(`本当に初期化しますか？\n移植日・延長・選択状態が消えます。`)) return;
       Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.keys(peopleByDate).forEach((k) => delete peopleByDate[k]);
       selectedIds.clear();
       historyStack.length = 0;
       redoStack.length = 0;
@@ -1717,6 +1909,7 @@
 
     function render(){
       updateCounter();
+      if(dailyListModal && dailyListModal.style.display === "flex") renderDailyListTable();
       zoomStage.innerHTML = "";
       cellElements.clear();
       prevSelectedVisualIds = new Set();
@@ -1959,6 +2152,12 @@
 
     entryCancelBtn.addEventListener("click", closeEntryModal);
     if(summaryBtn) summaryBtn.addEventListener("click", openSummaryModal);
+    if(dailyListBtn) dailyListBtn.addEventListener("click", () => {
+      closeMoreMenu();
+      openDailyListModal();
+    });
+    if(dailyListCopyBtn) dailyListCopyBtn.addEventListener("click", copyDailyListTable);
+    if(dailyListCloseBtn) dailyListCloseBtn.addEventListener("click", closeDailyListModal);
     if(summaryCloseBtn) summaryCloseBtn.addEventListener("click", closeSummaryModal);
     if(summaryAllBtn) summaryAllBtn.addEventListener("click", () => {
       const checkedCount = document.querySelectorAll(".summary-size:checked").length;
@@ -1984,6 +2183,9 @@
     });
     if(summaryModal) summaryModal.addEventListener("click", (e) => {
       if(e.target === summaryModal) closeSummaryModal();
+    });
+    if(dailyListModal) dailyListModal.addEventListener("click", (e) => {
+      if(e.target === dailyListModal) closeDailyListModal();
     });
     setDateBtn.addEventListener("click", openDateModal);
     extendBtn.addEventListener("click", toggleExtendSelection);
@@ -2024,6 +2226,7 @@
     document.addEventListener("pointerdown", (e) => {
       if(moreMenuPanel && !e.target.closest(".menu-wrap")) closeMoreMenu();
       if(summaryModal && summaryModal.style.display === "flex" && !e.target.closest("#summaryBox") && !e.target.closest("#summaryBtn")) closeSummaryModal();
+      if(dailyListModal && dailyListModal.style.display === "flex" && !e.target.closest("#dailyListBox") && !e.target.closest("#dailyListBtn")) closeDailyListModal();
       if(cellActionMenu && !e.target.closest("#cellActionMenu") && !e.target.closest(".cell")) closeCellActionMenu();
       if(!tooltipPinned) return;
       if(e.target.closest && e.target.closest(".cell") && pressLongFired) return;
@@ -2074,6 +2277,7 @@
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: todayString() }) === true, "fresh extend frame should show");
       console.assert(shouldShowExtendFrame({ extend: true, extendAppliedAt: new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10) }) === false, "old extend frame should hide");
       Object.keys(cellData).forEach((k) => delete cellData[k]);
+      Object.keys(peopleByDate).forEach((k) => delete peopleByDate[k]);
       selectedIds.clear();
       cellData["L1-0-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
       cellData["L1-1-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
