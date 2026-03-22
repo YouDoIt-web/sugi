@@ -523,6 +523,9 @@
     let dragSelectionLastUpdate = 0;
     let lastTapTime = 0;
     let suppressDoubleTapUntil = 0;
+    let baseStageWidth = 1;
+    let baseStageHeight = 1;
+    let cacheRebuildTimer = 0;
 
     function isLane(name){ return name.startsWith("L"); }
     function getRows(name){ return isLane(name) ? (laneLengths[Number(name.slice(1))] || 67) : (pathLengths[name] || 67); }
@@ -726,41 +729,50 @@
       if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
     }
 
+    function updateBaseStageMetrics(){
+      baseStageWidth = zoomStage.scrollWidth || zoomStage.offsetWidth || 1;
+      baseStageHeight = zoomStage.scrollHeight || zoomStage.offsetHeight || 1;
+    }
+
+    function scheduleCacheRebuild(delay = 120){
+      markSelectableCacheDirty();
+      if(cacheRebuildTimer) clearTimeout(cacheRebuildTimer);
+      cacheRebuildTimer = setTimeout(() => {
+        cacheRebuildTimer = 0;
+        rebuildSelectableCellCache(true);
+      }, delay);
+    }
+
     function updateLayoutViewport(){
       const top = layout.getBoundingClientRect().top;
       const safeBottom = 16;
       const h = Math.max(240, window.innerHeight - top - safeBottom);
       layout.style.height = `${h}px`;
-      const baseW = zoomStage.offsetWidth || 1;
-      const baseH = zoomStage.offsetHeight || 1;
-      const scaledW = Math.ceil(baseW * zoomScale);
-      const scaledH = Math.ceil(baseH * zoomScale);
+      const scaledW = Math.ceil(baseStageWidth * zoomScale);
+      const scaledH = Math.ceil(baseStageHeight * zoomScale);
       const extraBottom = Math.max(Math.round(window.innerHeight * 1.1), Math.round(420 * zoomScale));
       layout.style.paddingBottom = `${extraBottom}px`;
       layout.style.paddingRight = `0px`;
-      layoutSpacer.style.width = `1px`;
+      layoutSpacer.style.width = `${Math.max(1, scaledW)}px`;
       layoutSpacer.style.height = `${scaledH + 800}px`;
-      markSelectableCacheDirty();
     }
 
     function rebuildSelectableCellCache(force = false){
       if(!force && !selectableCacheDirty && selectableCellCache.length) return;
-      const stageRect = zoomStage.getBoundingClientRect();
       selectableCellCache = [];
       cellElements.forEach((el, id) => {
-        const r = el.getBoundingClientRect();
         selectableCellCache.push({
           id,
-          left: (r.left - stageRect.left) / zoomScale,
-          top: (r.top - stageRect.top) / zoomScale,
-          right: (r.right - stageRect.left) / zoomScale,
-          bottom: (r.bottom - stageRect.top) / zoomScale,
+          left: el.offsetLeft,
+          top: el.offsetTop,
+          right: el.offsetLeft + el.offsetWidth,
+          bottom: el.offsetTop + el.offsetHeight,
         });
       });
       selectableCacheDirty = false;
     }
 
-    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null){
+    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null, deferCache = false){
       if(!Number.isFinite(zoomScale) || zoomScale <= 0) zoomScale = 1;
       const rect = layout.getBoundingClientRect();
       let anchorX = layout.scrollLeft + rect.width / 2;
@@ -772,34 +784,35 @@
       zoomStage.style.transformOrigin = "0 0";
       zoomStage.style.transform = `scale(${zoomScale})`;
       updateLayoutViewport();
-      rebuildSelectableCellCache();
       if(centered && prevZoomScale > 0){
         const ratio = zoomScale / prevZoomScale;
         layout.scrollLeft = anchorX * ratio - (anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2);
         layout.scrollTop = anchorY * ratio - (anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2);
       }
       prevZoomScale = zoomScale;
+      if(deferCache) scheduleCacheRebuild(isIPadSubMode ? 180 : 120);
+      else rebuildSelectableCellCache(true);
     }
 
     function clientToContent(clientX, clientY){
-      const stageRect = zoomStage.getBoundingClientRect();
+      const rect = layout.getBoundingClientRect();
       return {
-        x: (clientX - stageRect.left) / zoomScale,
-        y: (clientY - stageRect.top) / zoomScale,
+        x: (layout.scrollLeft + clientX - rect.left) / zoomScale,
+        y: (layout.scrollTop + clientY - rect.top) / zoomScale,
       };
     }
 
     function updateDragSelection(){
       dragSelectionLastUpdate = performance.now();
       if(!selectableCellCache || selectableCellCache.length === 0) rebuildSelectableCellCache();
-      const stageRect = zoomStage.getBoundingClientRect();
+      const rect = layout.getBoundingClientRect();
       const currentContent = clientToContent(dragCurrentX, dragCurrentY);
       const leftContent = Math.min(dragStartContentX, currentContent.x);
       const topContent = Math.min(dragStartContentY, currentContent.y);
       const widthContent = Math.abs(currentContent.x - dragStartContentX);
       const heightContent = Math.abs(currentContent.y - dragStartContentY);
-      const left = stageRect.left + leftContent * zoomScale;
-      const top = stageRect.top + topContent * zoomScale;
+      const left = rect.left - layout.scrollLeft + leftContent * zoomScale;
+      const top = rect.top - layout.scrollTop + topContent * zoomScale;
       const width = widthContent * zoomScale;
       const height = heightContent * zoomScale;
       selectionBox.style.display = "block";
@@ -887,7 +900,7 @@
           const nextZoom = Math.max(0.2, Math.min(2, zoomScale * ratio));
           if(Math.abs(nextZoom - zoomScale) > 0.002){
             zoomScale = nextZoom;
-            applyZoom(true, cx, cy);
+            applyZoom(true, cx, cy, true);
           }
         }
       }
@@ -1037,7 +1050,7 @@
         if(e.pointerType === "touch" && dt > 0 && dt < 280){
           const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
           zoomScale = nextZoom;
-          applyZoom(true, e.clientX, e.clientY);
+          applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
           return;
         }
@@ -1279,6 +1292,7 @@
         frag.appendChild(line);
       }
       zoomStage.appendChild(frag);
+      updateBaseStageMetrics();
       markSelectableCacheDirty();
       rebuildSelectableCellCache(true);
       updateSelectionVisuals();
@@ -1417,7 +1431,7 @@
         if(dt > 0 && dt < 280){
           const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
           zoomScale = nextZoom;
-          applyZoom(true, e.clientX, e.clientY);
+          applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
           return;
         }
