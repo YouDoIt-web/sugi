@@ -1059,9 +1059,10 @@
 
     function buildPeopleOptions(selectedValue){
       const options = ['<option value=""></option>'];
-      for(let i = 1; i <= 20; i += 1){
-        const selected = String(selectedValue) === String(i) ? " selected" : "";
-        options.push(`<option value="${i}"${selected}>${i}</option>`);
+      for(let i = 1; i <= 10.0001; i += 0.5){
+        const value = Number.isInteger(i) ? String(i) : i.toFixed(1);
+        const selected = String(selectedValue) === value ? " selected" : "";
+        options.push(`<option value="${value}"${selected}>${value}</option>`);
       }
       return options.join("");
     }
@@ -1615,14 +1616,23 @@
         stopAutoScroll();
         return;
       }
-      if(moveMode){
-        panLastX = e.clientX;
-        panLastY = e.clientY;
-        return;
-      }
       pressMoved = false;
       pressLongFired = false;
       dragSelecting = false;
+      pressStartX = e.clientX;
+      pressStartY = e.clientY;
+      if(moveMode){
+        panLastX = e.clientX;
+        panLastY = e.clientY;
+        hideTooltip();
+        if(pressTimer) clearTimeout(pressTimer);
+        pressTimer = window.setTimeout(() => {
+          pressLongFired = true;
+          if(!selectedIds.has(id)) selectSingle(id);
+          showCellActionMenu(id, e.clientX, e.clientY);
+        }, 600);
+        return;
+      }
       dragCurrentX = e.clientX;
       dragCurrentY = e.clientY;
       const startContent = clientToContent(e.clientX, e.clientY);
@@ -1644,8 +1654,14 @@
       if(moveMode && activePointers.has(e.pointerId) && activePointers.size < 2){
         const dx = e.clientX - panLastX;
         const dy = e.clientY - panLastY;
-        layout.scrollLeft -= dx;
-        layout.scrollTop -= dy;
+        if(Math.abs(e.clientX - pressStartX) > 8 || Math.abs(e.clientY - pressStartY) > 8){
+          pressMoved = true;
+          if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
+        }
+        if(!pressLongFired){
+          layout.scrollLeft -= dx;
+          layout.scrollTop -= dy;
+        }
         panLastX = e.clientX;
         panLastY = e.clientY;
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
