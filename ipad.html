@@ -787,11 +787,12 @@
     function updateCounter(){
       const totalReadyCount = getReadyCount();
       const selectedReadyCount = selectedIds.size > 0 ? getReadyCount(selectedIds) : 0;
-      const baseCount = selectedIds.size > 0 ? selectedReadyCount : totalReadyCount;
+      const useSelectedSummary = selectedIds.size > 1;
+      const baseCount = useSelectedSummary ? selectedReadyCount : totalReadyCount;
       const rate = parseFloat(rateSelect.value || 0);
       const result = Math.floor(baseCount * 40 * rate);
       calcResult.textContent = `苗数: ${result}`;
-      if(selectedIds.size > 0){
+      if(useSelectedSummary){
         counter.textContent = `選択中の出荷可能: ${selectedReadyCount}`;
       } else {
         counter.textContent = `出荷可能コンテナ: ${totalReadyCount}`;
@@ -1905,8 +1906,19 @@
       console.assert(calcResult.textContent === "苗数: 40", "global seedlings should use total ready count");
       selectedIds.add("L1-0-1");
       updateCounter();
-      console.assert(counter.textContent.includes("選択中の出荷可能: 1"), "selected counter should show selected ready count");
-      console.assert(calcResult.textContent === "苗数: 20", "selected seedlings should use selected ready count");
+      console.assert(counter.textContent.includes("出荷可能コンテナ: 2"), "single selected cell should still show global counter");
+      console.assert(calcResult.textContent === "苗数: 40", "single selected cell should still use total seedlings");
+      selectedIds.add("L1-1-1");
+      updateCounter();
+      console.assert(counter.textContent.includes("選択中の出荷可能: 2"), "multi selection should show selected counter");
+      console.assert(calcResult.textContent === "苗数: 40", "multi selected cells should use selected seedlings when selection equals total");
+      cellData["L1-2-1"] = { date: new Date(Date.now() - 181 * 86400000).toISOString().slice(0, 10), size: "大" };
+      selectedIds.delete("L1-1-1");
+      updateCounter();
+      console.assert(calcResult.textContent === "苗数: 60", "single selected cell should keep total seedlings even when total differs");
+      selectedIds.add("L1-1-1");
+      updateCounter();
+      console.assert(calcResult.textContent === "苗数: 40", "multi selected cells should use selected seedlings when partial selection exists");
       const before = selectedIds.size;
       selectSingle("");
       console.assert(selectedIds.size === before, "empty id should not become selected");
