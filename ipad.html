@@ -212,7 +212,7 @@
       user-select: none;
       -webkit-user-select: none;
       -webkit-touch-callout: none;
-      touch-action: none;
+      touch-action: manipulation;
       cursor: pointer;
       overflow: hidden;
       position: relative;
@@ -833,9 +833,7 @@
         const loadedCells = parsed.cellData && typeof parsed.cellData === "object" ? parsed.cellData : parsed;
         Object.keys(cellData).forEach((k) => delete cellData[k]);
         Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
-        if(typeof parsed.zoomScale === "number" && Number.isFinite(parsed.zoomScale)) {
-          zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
-        }
+        zoomScale = 1;
         if(parsed.rate) rateSelect.value = parsed.rate;
       } catch(e){
         console.warn("load local failed", e);
@@ -877,7 +875,7 @@
       Object.keys(cellData).forEach((k) => delete cellData[k]);
       Object.entries(loadedCells).forEach(([k, v]) => { cellData[k] = v; });
 
-      if(typeof parsed.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, parsed.zoomScale));
+      zoomScale = 1;
       if(parsed.rate) rateSelect.value = String(parsed.rate);
 
       selectedIds.clear();
@@ -1141,9 +1139,9 @@
       const safeBottom = 16;
       const h = Math.max(240, metrics.height - top - safeBottom);
       layout.style.height = `${h}px`;
-      const scaledW = Math.ceil(baseStageWidth * zoomScale);
-      const scaledH = Math.ceil(baseStageHeight * zoomScale);
-      const extraBottom = Math.max(Math.round(metrics.height * 1.1), Math.round(420 * zoomScale));
+      const scaledW = Math.ceil(baseStageWidth);
+      const scaledH = Math.ceil(baseStageHeight);
+      const extraBottom = Math.max(Math.round(metrics.height * 1.1), 420);
       layout.style.paddingBottom = `${extraBottom}px`;
       layout.style.paddingRight = `0px`;
       layoutSpacer.style.width = `${Math.max(1, scaledW)}px`;
@@ -1166,27 +1164,13 @@
       selectableCacheDirty = false;
     }
 
-    function applyZoom(centered = false, anchorClientX = null, anchorClientY = null, deferCache = false){
-      if(!Number.isFinite(zoomScale) || zoomScale <= 0) zoomScale = 1;
-      const rect = layout.getBoundingClientRect();
-      const viewportAnchorX = anchorClientX != null ? (anchorClientX - rect.left) : rect.width / 2;
-      const viewportAnchorY = anchorClientY != null ? (anchorClientY - rect.top) : rect.height / 2;
-      const safePrevScale = prevZoomScale > 0 ? prevZoomScale : 1;
-      const anchorContentX = (layout.scrollLeft + viewportAnchorX) / safePrevScale;
-      const anchorContentY = (layout.scrollTop + viewportAnchorY) / safePrevScale;
-
+    function applyZoom(){
+      zoomScale = 1;
       zoomStage.style.transformOrigin = "0 0";
-      zoomStage.style.transform = `scale(${zoomScale})`;
+      zoomStage.style.transform = "none";
       updateLayoutViewport();
-
-      if(centered){
-        layout.scrollLeft = anchorContentX * zoomScale - viewportAnchorX;
-        layout.scrollTop = anchorContentY * zoomScale - viewportAnchorY;
-      }
-
-      prevZoomScale = zoomScale;
-      if(deferCache) scheduleCacheRebuild(isIPadSubMode ? 180 : 120);
-      else rebuildSelectableCellCache(true);
+      prevZoomScale = 1;
+      rebuildSelectableCellCache(true);
     }
 
     function clientToContent(clientX, clientY){
@@ -1276,35 +1260,21 @@
     }
 
     function updateTwoFingerScroll(){
-      suppressDoubleTapUntil = Date.now() + 350;
       recentTouchScrollUntil = Date.now() + 500;
       if(activePointers.size !== 2) return;
       const pts = [...activePointers.values()];
       const cx = (pts[0].x + pts[1].x) / 2;
       const cy = (pts[0].y + pts[1].y) / 2;
-      const dist = getTwoFingerDistance();
       const hadPrevCenter = lastCenterX !== 0 || lastCenterY !== 0;
-      const hadPrevDistance = lastPinchDistance > 0;
 
       if(hadPrevCenter){
         layout.scrollLeft -= (cx - lastCenterX);
         layout.scrollTop -= (cy - lastCenterY);
       }
 
-      if(hadPrevDistance && dist > 0){
-        const ratio = dist / lastPinchDistance;
-        const delta = Math.abs(dist - lastPinchDistance);
-        if(delta > 3 && Math.abs(ratio - 1) > 0.004){
-          const nextZoom = Math.max(0.2, Math.min(2, zoomScale * ratio));
-          if(Math.abs(nextZoom - zoomScale) > 0.002){
-            zoomScale = nextZoom;
-            applyZoom(true, cx, cy, true);
-          }
-        }
-      }
       lastCenterX = cx;
       lastCenterY = cy;
-      lastPinchDistance = dist;
+      lastPinchDistance = 0;
     }
 
     function updateSelectionVisuals(){
@@ -1513,7 +1483,7 @@
         try {
           Object.keys(cellData).forEach((k) => delete cellData[k]);
           Object.entries(data.cellData || {}).forEach(([k, v]) => { cellData[k] = v; });
-          if(typeof data.zoomScale === "number") zoomScale = Math.max(0.2, Math.min(2, data.zoomScale));
+          zoomScale = 1;
           if(data.rate) rateSelect.value = String(data.rate);
           render();
           applyZoom(false);
@@ -1966,7 +1936,7 @@
     if(isIPadSubMode) document.body.classList.add("ipad-sub");
     loadLocalState();
     loadCellClipboard();
-    prevZoomScale = zoomScale;
+    prevZoomScale = 1;
     updateMoveModeButton();
     updateRectModeButton();
     render();
