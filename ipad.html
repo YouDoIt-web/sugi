@@ -468,7 +468,6 @@
     </div>
   </div>
 
-
   <div id="entryModal">
     <div id="entryBox">
       <h2>移植情報入力</h2>
@@ -842,8 +841,8 @@
 
     function updateSelectedCounter(){
       updateCounter();
-      calcSummary();
     }
+
     const SUMMARY_TARGET_SIZES = ["特大", "大", "中", "挿", "戻"];
 
     function getSummaryTargetIds(){
@@ -887,8 +886,7 @@
         `コンテナ数: ${totalCount}`,
         `苗数: ${seedlings}`,
         `内訳: ${detailText}`
-      ].join("
-");
+      ].join("\n");
     }
 
     function openSummaryModal(){
@@ -900,7 +898,6 @@
     function closeSummaryModal(){
       if(summaryModal) summaryModal.style.display = "none";
     }
-
 
     function saveLocalState(){
       try {
@@ -1961,9 +1958,9 @@
     });
 
     entryCancelBtn.addEventListener("click", closeEntryModal);
-    summaryBtn.addEventListener("click", openSummaryModal);
-    summaryCloseBtn.addEventListener("click", closeSummaryModal);
-    summaryAllBtn.addEventListener("click", () => {
+    if(summaryBtn) summaryBtn.addEventListener("click", openSummaryModal);
+    if(summaryCloseBtn) summaryCloseBtn.addEventListener("click", closeSummaryModal);
+    if(summaryAllBtn) summaryAllBtn.addEventListener("click", () => {
       const checkedCount = document.querySelectorAll(".summary-size:checked").length;
       setAllSummaryChecks(checkedCount !== SUMMARY_TARGET_SIZES.length);
       calcSummary();
@@ -1985,7 +1982,7 @@
     entryModal.addEventListener("click", (e) => {
       if(e.target === entryModal) closeEntryModal();
     });
-    summaryModal.addEventListener("click", (e) => {
+    if(summaryModal) summaryModal.addEventListener("click", (e) => {
       if(e.target === summaryModal) closeSummaryModal();
     });
     setDateBtn.addEventListener("click", openDateModal);
