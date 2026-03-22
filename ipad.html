@@ -1319,7 +1319,7 @@
           && dt < 280
           && tapMove <= 18;
         if(canDoubleTapZoom){
-          const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
+          const nextZoom = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
           zoomScale = nextZoom;
           applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
@@ -1710,7 +1710,7 @@
         const dt = now - lastTapTime;
         const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
         if(dt > 0 && dt < 280 && tapMove <= 18){
-          const nextZoom = zoomScale < 1 ? 1 : zoomScale < 1.5 ? 1.5 : zoomScale < 2 ? 2 : 1;
+          const nextZoom = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
           zoomScale = nextZoom;
           applyZoom(true, e.clientX, e.clientY, true);
           lastTapTime = 0;
