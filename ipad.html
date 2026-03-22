@@ -1396,30 +1396,6 @@
         clearDragBox();
         updateSelectionVisuals();
       } else if(!rectSelectMode && !pressLongFired && !pressMoved){
-        const now = Date.now();
-        if(now < suppressDoubleTapUntil){
-          lastTapTime = 0;
-          selectSingle(id);
-          return;
-        }
-        const dt = now - lastTapTime;
-        const tapMove = Math.hypot(e.clientX - lastTouchUpX, e.clientY - lastTouchUpY);
-        const canDoubleTapZoom = e.pointerType === "touch"
-          && now >= recentTouchScrollUntil
-          && dt > 0
-          && dt < 280
-          && tapMove <= 18;
-        if(canDoubleTapZoom){
-          zoomScale = zoomScale < 0.75 ? 1 : zoomScale < 1.5 ? 2 : 0.5;
-          applyZoom(true, e.clientX, e.clientY, true);
-          lastTapTime = 0;
-          lastTouchUpX = 0;
-          lastTouchUpY = 0;
-          return;
-        }
-        lastTapTime = now;
-        lastTouchUpX = e.clientX;
-        lastTouchUpY = e.clientY;
         selectSingle(id);
       }
     }
@@ -1776,15 +1752,8 @@
     layout.addEventListener("pointerup", (e) => {
       if(!activePointers.has(e.pointerId)) return;
       activePointers.delete(e.pointerId);
-      if(activePointers.size < 2){
-        lastCenterX = 0;
-        lastCenterY = 0;
-        lastPinchDistance = 0;
-      }
-      if(pressTimer){
-        clearTimeout(pressTimer);
-        pressTimer = null;
-      }
+      if(activePointers.size < 2){ lastCenterX = 0; lastCenterY = 0; lastPinchDistance = 0; }
+      if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
       autoScrollDirX = 0;
       autoScrollDirY = 0;
       if(dragSelecting){
@@ -1792,9 +1761,9 @@
         clearDragBox();
         updateSelectionVisuals();
       }
-      // レイアウト空白部分ではダブルタップ拡大をしない。
-      // セル側のダブルタップ判定だけを有効にして、
-      // iPadでのスクロール不能化を起こしやすい競合を避ける。
+      // ダブルタップ拡大は無効化
+      // 空白部分のタッチ終了では何もしない
+      
     });
 
     entryCancelBtn.addEventListener("click", closeEntryModal);
