@@ -430,8 +430,8 @@
         <div id="moreMenuPanel">
           <button id="summaryBtn" type="button">集計</button>
           <button id="dailyListBtn" type="button">日別リスト</button>
-          <button id="copyBtn" type="button">コピー保存</button>
-          <button id="pasteImportBtn" type="button">貼り付け読込</button>
+          <button id="fileSaveBtn" type="button">ファイル保存</button>
+          <button id="fileLoadBtn" type="button">ファイル読込</button>
           <button id="resetBtn" type="button">初期化</button>
         </div>
       </div>
@@ -439,6 +439,8 @@
     </div>
     <div class="topbar-right"></div>
   </div>
+
+  <input id="importFileInput" type="file" accept=".json,application/json" style="display:none;">
 
   <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap;">
     <div id="counter" style="font-size:14px;font-weight:bold;">出荷可能コンテナ: 0</div>
@@ -611,8 +613,6 @@
     const redoBtn = document.getElementById("redoBtn");
     const deleteBtn = document.getElementById("deleteBtn");
     const resetBtn = document.getElementById("resetBtn");
-    const copyBtn = document.getElementById("copyBtn");
-    const pasteImportBtn = document.getElementById("pasteImportBtn");
     const moreMenuBtn = document.getElementById("moreMenuBtn");
     const moreMenuPanel = document.getElementById("moreMenuPanel");
     const summaryBtn = document.getElementById("summaryBtn");
@@ -620,6 +620,9 @@
     const summaryResult = document.getElementById("summaryResult");
     const summaryCloseBtn = document.getElementById("summaryCloseBtn");
     const summaryAllBtn = document.getElementById("summaryAllBtn");
+    const fileSaveBtn = document.getElementById("fileSaveBtn");
+    const fileLoadBtn = document.getElementById("fileLoadBtn");
+    const importFileInput = document.getElementById("importFileInput");
     const dailyListBtn = document.getElementById("dailyListBtn");
     const dailyListModal = document.getElementById("dailyListModal");
     const dailyListTableWrap = document.getElementById("dailyListTableWrap");
@@ -992,17 +995,6 @@
       };
     }
 
-    async function copyJson(){
-      try {
-        const json = JSON.stringify(buildBackupPayload(), null, 2);
-        await navigator.clipboard.writeText(json);
-        showToast("JSONをコピーしました");
-      } catch(e) {
-        console.error(e);
-        alert("コピー保存に失敗しました");
-      }
-    }
-
     function applyImportedPayload(parsed){
       const loadedCells = parsed && parsed.cellData && typeof parsed.cellData === "object"
         ? parsed.cellData
@@ -1028,6 +1020,46 @@
       scheduleCloudSave();
     }
 
+
+    function downloadBackupFile(){
+      try {
+        const payload = buildBackupPayload();
+        const text = JSON.stringify(payload, null, 2);
+        const blob = new Blob([text], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[\:T]/g, "-");
+        a.href = url;
+        a.download = `suginae-backup-${stamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast("バックアップファイルを保存しました");
+      } catch(e){
+        console.error(e);
+        alert("ファイル保存に失敗しました");
+      }
+    }
+
+    function importFromFile(file){
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          applyImportedPayload(parsed);
+          showToast("バックアップを読み込みました");
+        } catch(e){
+          console.error(e);
+          alert("JSONファイルの読み込みに失敗しました");
+        }
+      };
+      reader.onerror = () => {
+        alert("ファイルの読み込みに失敗しました");
+      };
+      reader.readAsText(file);
+    }
 
     function getJaWeekday(dateString){
       const d = new Date(`${dateString}T00:00:00`);
@@ -1059,10 +1091,9 @@
 
     function buildPeopleOptions(selectedValue){
       const options = ['<option value=""></option>'];
-      for(let i = 1; i <= 10.0001; i += 0.5){
-        const value = Number.isInteger(i) ? String(i) : i.toFixed(1);
-        const selected = String(selectedValue) === value ? " selected" : "";
-        options.push(`<option value="${value}"${selected}>${value}</option>`);
+      for(let i = 1; i <= 20; i += 1){
+        const selected = String(selectedValue) === String(i) ? " selected" : "";
+        options.push(`<option value="${i}"${selected}>${i}</option>`);
       }
       return options.join("");
     }
@@ -1158,19 +1189,6 @@
       } catch(e){
         console.error(e);
         alert("表のコピーに失敗しました");
-      }
-    }
-
-    function importFromPaste(){
-      const text = prompt("JSONを貼り付けてください");
-      if(!text) return;
-      try {
-        const parsed = JSON.parse(text);
-        applyImportedPayload(parsed);
-        showToast("貼り付け読込しました");
-      } catch(e) {
-        console.error(e);
-        alert("JSONが不正です");
       }
     }
 
@@ -1616,23 +1634,14 @@
         stopAutoScroll();
         return;
       }
-      pressMoved = false;
-      pressLongFired = false;
-      dragSelecting = false;
-      pressStartX = e.clientX;
-      pressStartY = e.clientY;
       if(moveMode){
         panLastX = e.clientX;
         panLastY = e.clientY;
-        hideTooltip();
-        if(pressTimer) clearTimeout(pressTimer);
-        pressTimer = window.setTimeout(() => {
-          pressLongFired = true;
-          if(!selectedIds.has(id)) selectSingle(id);
-          showCellActionMenu(id, e.clientX, e.clientY);
-        }, 600);
         return;
       }
+      pressMoved = false;
+      pressLongFired = false;
+      dragSelecting = false;
       dragCurrentX = e.clientX;
       dragCurrentY = e.clientY;
       const startContent = clientToContent(e.clientX, e.clientY);
@@ -1654,14 +1663,8 @@
       if(moveMode && activePointers.has(e.pointerId) && activePointers.size < 2){
         const dx = e.clientX - panLastX;
         const dy = e.clientY - panLastY;
-        if(Math.abs(e.clientX - pressStartX) > 8 || Math.abs(e.clientY - pressStartY) > 8){
-          pressMoved = true;
-          if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; }
-        }
-        if(!pressLongFired){
-          layout.scrollLeft -= dx;
-          layout.scrollTop -= dy;
-        }
+        layout.scrollLeft -= dx;
+        layout.scrollTop -= dy;
         panLastX = e.clientX;
         panLastY = e.clientY;
         activePointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -2210,8 +2213,19 @@
     deleteBtn.addEventListener("click", deleteSelection);
     clearSelBtn.addEventListener("click", clearSelection);
     resetBtn.addEventListener("click", () => { closeMoreMenu(); resetAll(); });
-    copyBtn.addEventListener("click", () => { closeMoreMenu(); copyJson(); });
-    pasteImportBtn.addEventListener("click", () => { closeMoreMenu(); importFromPaste(); });
+    if(fileSaveBtn) fileSaveBtn.addEventListener("click", () => {
+      closeMoreMenu();
+      downloadBackupFile();
+    });
+    if(fileLoadBtn) fileLoadBtn.addEventListener("click", () => {
+      closeMoreMenu();
+      if(importFileInput) importFileInput.click();
+    });
+    if(importFileInput) importFileInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if(file) importFromFile(file);
+      e.target.value = "";
+    });
     moreMenuBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       moreMenuPanel.classList.toggle("open");
